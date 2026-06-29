@@ -4,6 +4,7 @@
 	import Sortable from 'sortablejs';
 
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import {
 		user,
 		chats,
@@ -76,7 +77,61 @@
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
+	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'pm'];
+
+	let pmNavOpen = false;
+
+	const pmModuleGroups = [
+		{
+			id: 'core',
+			label: '⚙️ 管理',
+			modules: [
+				{ id: 'workflow', label: '工作流' },
+				{ id: 'versions', label: '版本管理' },
+				{ id: 'traceability', label: '溯源关系' }
+			]
+		},
+		{
+			id: 'plan',
+			label: '🗺️ 规划',
+			modules: [
+				{ id: 'prd', label: 'PRD 文档' },
+				{ id: 'requirement', label: '需求管理' },
+				{ id: 'roadmap', label: '产品路线图' }
+			]
+		},
+		{
+			id: 'design',
+			label: '🎨 设计',
+			modules: [
+				{ id: 'parameter', label: '参数配置' },
+				{ id: 'product-architecture', label: '产品架构' },
+				{ id: 'competitor', label: '竞品分析' }
+			]
+		},
+		{
+			id: 'execute',
+			label: '⚡ 执行',
+			modules: [
+				{ id: 'testcase', label: '测试用例' },
+				{ id: 'risk', label: '风险分析' },
+				{ id: 'meeting', label: '会议纪要' }
+			]
+		},
+		{
+			id: 'review',
+			label: '📊 复盘',
+			modules: [
+				{ id: 'acceptance', label: '验收报告' },
+				{ id: 'faq', label: 'FAQ' }
+			]
+		}
+	];
+
+	$: isPmRoute = $page.url.pathname.startsWith('/pm');
+	$: pmProjectId = isPmRoute ? $page.url.pathname.split('/')[2] || '' : '';
+	$: activePmModule = isPmRoute ? ($page.url.pathname.split('/')[3] || '') : '';
+	$: if (isPmRoute && !pmNavOpen) { pmNavOpen = true; }
 
 	let scrollTop = 0;
 
@@ -134,6 +189,8 @@
 				);
 			case 'playground':
 				return $user?.role === 'admin';
+			case 'pm':
+				return true;
 			default:
 				return false;
 		}
@@ -145,7 +202,8 @@
 			workspace: { label: 'Workspace', href: '/workspace', iconType: 'workspace' },
 			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
 			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
-			playground: { label: 'Playground', href: '/playground', iconType: 'playground' }
+			playground: { label: 'Playground', href: '/playground', iconType: 'playground' },
+			pm: { label: 'PM 工作台', href: '/pm', iconType: 'pm' }
 		};
 		return items[id];
 	};
@@ -924,6 +982,17 @@
 											</svg>
 										{:else if itemId === 'playground'}
 											<Code className="size-4.5" />
+										{:else if itemId === 'pm'}
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="1.5"
+												stroke="currentColor"
+												class="size-4.5"
+											>
+												<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h4.5m-4.5 0H6.375a.375.375 0 0 1-.375-.375V6.375c0-.207.168-.375.375-.375h6.75c.207 0 .375.168.375.375v3.75m4.5 0h-4.5m4.5 0H18a.375.375 0 0 1 .375.375v6.75c0 .207-.168.375-.375.375h-4.5" />
+											</svg>
 										{/if}
 									</div>
 								</a>
@@ -1111,22 +1180,20 @@
 						{#each pinnedItems as itemId (itemId)}
 							{@const meta = getMenuItemMeta(itemId)}
 							{#if meta && isMenuItemVisible(itemId)}
-								<div
-									class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200"
-									data-id={itemId}
-								>
-									<a
-										id="sidebar-{itemId}-button"
-										class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-										href={meta.href}
-										on:click={itemClickHandler}
-										draggable="false"
-										aria-label={$i18n.t(meta.label)}
+								{#if itemId === 'pm'}
+									<div
+										class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200"
+										data-id={itemId}
 									>
-										<div class="self-center">
-											{#if itemId === 'notes'}
-												<Note className="size-4.5" strokeWidth="2" />
-											{:else if itemId === 'workspace'}
+										<button
+											id="sidebar-{itemId}-button"
+											class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {isPmRoute ? 'bg-gray-100 dark:bg-gray-900' : ''}"
+											on:click={() => { pmNavOpen = !pmNavOpen; }}
+											draggable="false"
+											aria-label={$i18n.t(meta.label)}
+											aria-expanded={pmNavOpen}
+										>
+											<div class="self-center">
 												<svg
 													xmlns="http://www.w3.org/2000/svg"
 													fill="none"
@@ -1135,52 +1202,110 @@
 													stroke="currentColor"
 													class="size-4.5"
 												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
-													/>
+													<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h4.5m-4.5 0H6.375a.375.375 0 0 1-.375-.375V6.375c0-.207.168-.375.375-.375h6.75c.207 0 .375.168.375.375v3.75m4.5 0h-4.5m4.5 0H18a.375.375 0 0 1 .375.375v6.75c0 .207-.168.375-.375.375h-4.5" />
 												</svg>
-											{:else if itemId === 'automations'}
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													fill="none"
-													viewBox="0 0 24 24"
-													stroke-width="2"
-													stroke="currentColor"
-													class="size-4.5"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-													/>
-												</svg>
-											{:else if itemId === 'calendar'}
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													fill="none"
-													viewBox="0 0 24 24"
-													stroke-width="2"
-													stroke="currentColor"
-													class="size-4.5"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
-													/>
-												</svg>
-											{:else if itemId === 'playground'}
-												<Code className="size-4.5" strokeWidth="2" />
-											{/if}
-										</div>
+											</div>
+											<div class="flex flex-1 self-center translate-y-[0.5px]">
+												<div class=" self-center text-sm font-primary">{$i18n.t(meta.label)}</div>
+											</div>
+											<svg class="w-3.5 h-3.5 text-gray-400 transition-transform duration-200 {pmNavOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+											</svg>
+										</button>
+									</div>
+									{#if pmNavOpen}
+										{#each pmModuleGroups as group (group.id)}
+											<div class="px-3 mt-1">
+												<div class="px-2 py-1 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+													{group.label}
+												</div>
+												{#each group.modules as mod (mod.id)}
+													<a
+														class="flex items-center space-x-3 rounded-xl px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {activePmModule === mod.id ? 'bg-gray-100 dark:bg-gray-900 text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}"
+														href={pmProjectId ? `/pm/${pmProjectId}/${mod.id}` : '/pm'}
+														on:click={itemClickHandler}
+														draggable="false"
+														aria-label={mod.label}
+														aria-current={activePmModule === mod.id ? 'page' : undefined}
+													>
+														<div class=" self-center text-sm font-primary">{mod.label}</div>
+													</a>
+												{/each}
+											</div>
+										{/each}
+									{/if}
+								{:else}
+									<div
+										class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200"
+										data-id={itemId}
+									>
+										<a
+											id="sidebar-{itemId}-button"
+											class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+											href={meta.href}
+											on:click={itemClickHandler}
+											draggable="false"
+											aria-label={$i18n.t(meta.label)}
+										>
+											<div class="self-center">
+												{#if itemId === 'notes'}
+													<Note className="size-4.5" strokeWidth="2" />
+												{:else if itemId === 'workspace'}
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="2"
+														stroke="currentColor"
+														class="size-4.5"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
+														/>
+													</svg>
+												{:else if itemId === 'automations'}
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="2"
+														stroke="currentColor"
+														class="size-4.5"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+														/>
+													</svg>
+												{:else if itemId === 'calendar'}
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="2"
+														stroke="currentColor"
+														class="size-4.5"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
+														/>
+													</svg>
+												{:else if itemId === 'playground'}
+													<Code className="size-4.5" strokeWidth="2" />
+												{/if}
+											</div>
 
-										<div class="flex self-center translate-y-[0.5px]">
-											<div class=" self-center text-sm font-primary">{$i18n.t(meta.label)}</div>
-										</div>
-									</a>
-								</div>
+											<div class="flex self-center translate-y-[0.5px]">
+												<div class=" self-center text-sm font-primary">{$i18n.t(meta.label)}</div>
+											</div>
+										</a>
+									</div>
+								{/if}
 							{/if}
 						{/each}
 					</div>
