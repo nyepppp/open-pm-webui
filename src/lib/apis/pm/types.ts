@@ -97,7 +97,7 @@ export interface Attachment {
 
 // Requirement
 export interface Requirement {
-	source?: 'manual' | 'excel' | 'agent';
+	source?: 'manual' | 'excel' | 'agent' | 'prd';
 	category?: string;
 	tags?: string[];
 	userRole?: string;
