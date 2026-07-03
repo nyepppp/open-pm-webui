@@ -250,6 +250,9 @@
 				data.versionId = currentVer.id;
 				if (data.data && typeof data.data === 'object') {
 					(data.data as Record<string, unknown>).versionId = currentVer.id;
+				} else {
+					// For rich editor types (meeting, prd) without explicit data, create data with versionId
+					data.data = { versionId: currentVer.id };
 				}
 			}
 			const created = await createEntry(token, projectId, data);
@@ -409,6 +412,7 @@
 	let editStatus = $state<ModuleStatus>('draft');
 	let editSource = $state<string>('manual');
 	let editCategory = $state('');
+	let editVersionId = $state<string>('');
 
 	function openEditDrawer(entry: any) {
 		editDrawerEntry = entry;
@@ -418,6 +422,7 @@
 		editStatus = entry.status || 'draft';
 		editSource = getEntryData(entry, 'source') || 'manual';
 		editCategory = getEntryData(entry, 'category') || '';
+		editVersionId = getEntryData(entry, 'versionId') || entry.versionId || '';
 		showEditDrawer = true;
 	}
 
@@ -441,6 +446,14 @@
 				data.data = { ...(editDrawerEntry.data || {} ) };
 			} else if (moduleType === 'prototype' || moduleType === 'schedule') {
 				data.data = { ...(editDrawerEntry.data || {} ) };
+			}
+			// Preserve versionId from data if present
+			const drawerVersionId = editDrawerEntry.data?.versionId || editDrawerEntry.versionId;
+			if (drawerVersionId) {
+				data.versionId = drawerVersionId;
+				if (data.data && typeof data.data === 'object') {
+					(data.data as Record<string, unknown>).versionId = drawerVersionId;
+				}
 			}
 			await updateEntry(token, editDrawerEntry.id, data);
 			showEditDrawer = false;
@@ -485,7 +498,7 @@
 			editingEntry = await getEntry(token, entryId);
 			editingDocTitle = editingEntry.title;
 			editingDocStatus = editingEntry.status || 'draft';
-			editingVersionId = getEntryData(editingEntry, 'versionId') || '';
+			editingVersionId = getEntryData(editingEntry, 'versionId') || editingEntry.versionId || '';
 
 			if (moduleType === 'prd') {
 				const data = editingEntry.data || editingEntry.metadata || {};
@@ -552,16 +565,20 @@
 					editingSections[idx] = { ...editingSections[idx], content: editingContentMd || editingContentHtml };
 					editingSections = [...editingSections];
 				}
+				const autoPrdVid = editingVersionId || editingEntry?.data?.versionId || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle, status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: { sections: editingSections, versionId: editingEntry?.data?.versionId || '' }
+					data: { sections: editingSections, versionId: autoPrdVid },
+					versionId: autoPrdVid
 				});
 			} else {
+				const autoVid = editingVersionId || editingEntry?.data?.versionId || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle, status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: editingEntry?.data
+					data: { ...(editingEntry?.data || {}), versionId: autoVid },
+					versionId: autoVid
 				});
 			}
 		} catch (e: any) {
@@ -636,33 +653,40 @@
 					editingSections[idx] = { ...editingSections[idx], content: editingContentMd || editingContentHtml };
 					editingSections = [...editingSections];
 				}
-				const autoVersionId = $currentVersion?.id || '';
+				const prdVersionId = editingVersionId || $currentVersion?.id || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle,
 					status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: { sections: editingSections, versionId: autoVersionId },
-					versionId: autoVersionId
+					data: { sections: editingSections, versionId: prdVersionId },
+					versionId: prdVersionId
 				});
 			} else if (isFormView && editingEntry) {
+				const formVersionId = editingVersionId || $currentVersion?.id || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle,
 					status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: editingEntry.data
+					data: { ...editingEntry.data, versionId: formVersionId },
+					versionId: formVersionId
 				});
 			} else if (isCompetitorView && editingEntry) {
+				const compVersionId = editingVersionId || $currentVersion?.id || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle,
 					status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: editingEntry.data
+					data: { ...editingEntry.data, versionId: compVersionId },
+					versionId: compVersionId
 				});
 			} else {
+				const richVersionId = editingVersionId || $currentVersion?.id || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle,
 					status: editingDocStatus,
-					content: editingContentMd || editingContentHtml
+					content: editingContentMd || editingContentHtml,
+					data: { ...(editingEntry?.data || {}), versionId: richVersionId },
+					versionId: richVersionId
 				});
 			}
 			toast.success('保存成功');
@@ -1306,8 +1330,13 @@
 										<span class="px-1.5 py-0.5 rounded text-xs {nodeStatusMap[ns]?.c || INACTIVE}">{nodeStatusMap[ns]?.l || ns || '-'}</span>
 									{:else if col.key === 'currentVersionNumber'}
 										{@const cvn = entry.currentVersionNumber}
-										{#if cvn}
-											<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{cvn}</span>
+										{@const entryVid = entry.versionId || getEntryData(entry, 'versionId')}
+										{@const isUuid = cvn && /^[0-9a-f]{8}-/i.test(String(cvn))}
+										{@const resolvedVid = isUuid ? cvn : entryVid}
+										{@const matchedVersion = resolvedVid ? $versionList.find((v: any) => v.id === resolvedVid) : null}
+										{@const displayVn = matchedVersion ? (matchedVersion.versionNumber || matchedVersion.version_number) : (!isUuid && cvn ? cvn : '')}
+										{#if displayVn}
+											<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{displayVn}</span>
 											{#if entry.branchName && entry.branchName !== 'main'}
 												<span class="ml-1 px-1 py-0.5 rounded text-[10px] bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400">{entry.branchName}</span>
 											{/if}
@@ -1315,7 +1344,7 @@
 											<span class="text-xs text-gray-400">-</span>
 										{/if}
 									{:else if col.key === 'versionId'}
-										{@const vid = getEntryData(entry, 'versionId')}
+										{@const vid = getEntryData(entry, 'versionId') || entry.versionId}
 										{#if vid}<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{$versionList.find((v: any) => v.id === vid)?.versionNumber || vid}</span>{:else}<span class="text-xs text-gray-400">-</span>{/if}
 									{:else if col.key === 'startDate' || col.key === 'endDate'}
 										{#if (moduleType === 'schedule' || moduleType === 'roadmap') && inlineEditCell?.entryId === entry.id && inlineEditCell?.field === col.key}
@@ -1430,13 +1459,14 @@
 							<div class="flex items-center gap-2 self-center justify-between">
 								<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{entry.title}</div>
 								<div class="flex shrink-0 items-center text-xs gap-2">
-									{#if true}
-										{@const cardVersionId = getEntryData(entry, 'versionId')}
-										{@const cardVersion = cardVersionId ? $versionList.find((v: any) => v.id === cardVersionId) : null}
-										<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded-full {cardVersion ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400'}">
-											{cardVersion?.versionNumber || cardVersion?.version_number || '-'}
-										</span>
-									{/if}
+														{#if true}
+															{@const cardVersionId = getEntryData(entry, 'versionId') || entry.versionId || (entry.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(entry.currentVersionNumber)) ? entry.currentVersionNumber : '')}
+															{@const cardVersion = cardVersionId ? $versionList.find((v: any) => v.id === cardVersionId) : null}
+															{@const cardVersionDisplay = cardVersion ? (cardVersion.versionNumber || cardVersion.version_number) : (cardVersionId && !/^[0-9a-f]{8}-/i.test(cardVersionId) ? cardVersionId : '')}
+															<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded-full {cardVersionDisplay ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400'}">
+																{cardVersionDisplay || '-'}
+															</span>
+														{/if}
 									{#if entry.priority}<span class="px-1.5 py-0.5 rounded text-xs {prioMap[entry.priority]?.c || ''}">{prioMap[entry.priority]?.l || ''}</span>{/if}
 									<span class="px-1.5 py-0.5 rounded text-xs {statusMap[entry.status]?.c || statusMap.draft.c}">{statusMap[entry.status]?.l || '草稿'}</span>
 									<span class="text-gray-500">{formatTime(entry.updated_at || entry.updatedAt)}</span>
@@ -1458,13 +1488,14 @@
 						<div class="flex items-center gap-2 self-center justify-between">
 							<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{entry.title}</div>
 							<div class="flex shrink-0 items-center text-xs gap-2">
-								{#if true}
-									{@const cardVersionId2 = getEntryData(entry, 'versionId')}
-									{@const cardVersion2 = cardVersionId2 ? $versionList.find((v: any) => v.id === cardVersionId2) : null}
-									<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded-full {cardVersion2 ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400'}">
-										{cardVersion2?.versionNumber || cardVersion2?.version_number || '-'}
-									</span>
-								{/if}
+														{#if true}
+															{@const cardVersionId2 = getEntryData(entry, 'versionId') || entry.versionId || (entry.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(entry.currentVersionNumber)) ? entry.currentVersionNumber : '')}
+															{@const cardVersion2 = cardVersionId2 ? $versionList.find((v: any) => v.id === cardVersionId2) : null}
+															{@const cardVersionDisplay2 = cardVersion2 ? (cardVersion2.versionNumber || cardVersion2.version_number) : (cardVersionId2 && !/^[0-9a-f]{8}-/i.test(cardVersionId2) ? cardVersionId2 : '')}
+															<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded-full {cardVersionDisplay2 ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400'}">
+																{cardVersionDisplay2 || '-'}
+															</span>
+														{/if}
 								{#if entry.priority}<span class="px-1.5 py-0.5 rounded text-xs {prioMap[entry.priority]?.c || ''}">{prioMap[entry.priority]?.l || ''}</span>{/if}
 								<span class="px-1.5 py-0.5 rounded text-xs {statusMap[entry.status]?.c || statusMap.draft.c}">{statusMap[entry.status]?.l || '草稿'}</span>
 								<span class="text-gray-500">{formatTime(entry.updated_at || entry.updatedAt)}</span>
@@ -1560,6 +1591,12 @@
 				</div>
 				<select class="text-xs px-2 py-1 bg-gray-50 dark:bg-gray-800 border-0 rounded-lg outline-hidden" bind:value={editingDocStatus}>
 					{#each ['draft', 'review', 'approved', 'archived'] as s}<option value={s}>{statusMap[s]?.l || s}</option>{/each}
+				</select>
+				<select class="text-xs px-2 py-1 bg-gray-50 dark:bg-gray-800 border-0 rounded-lg outline-hidden" value={editingVersionId} onchange={(e) => { editingVersionId = (e.target as HTMLSelectElement).value; saveStatus = 'unsaved'; }}>
+					<option value="">无版本</option>
+					{#each $versionList as v (v.id)}
+						<option value={v.id}>{v.versionNumber || v.version_number || 'v?'}</option>
+					{/each}
 				</select>
 				<button class="px-3 py-1.5 text-sm bg-black text-white dark:bg-white dark:text-black rounded-lg font-medium" onclick={saveEntryDoc}>保存</button>
 			</div>

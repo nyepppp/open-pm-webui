@@ -36,7 +36,6 @@
 	let annotationPanelVisible = $state(false);
 	let hasSelection = $state(false);
 	let annotationBtnPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
-	let initError = $state('');
 
 	// Track last synced prop content with a non-reactive variable to avoid $effect loops
 	let lastPropContent = content;
@@ -44,22 +43,11 @@
 	let editorReady = $state(false);
 
 	onMount(() => {
-		if (!element) {
-			console.warn('PMRichEditor: element not available on mount');
-			initError = '编辑器初始化失败：DOM元素未找到';
-			isFallback = true;
-			return;
-		}
+		if (!element) return;
 		// Defer init to next frame so DOM is fully ready
 		requestAnimationFrame(() => {
-			if (!element) {
-				console.warn('PMRichEditor: element not available after rAF');
-				initError = '编辑器初始化失败：DOM元素未找到';
-				isFallback = true;
-				return;
-			}
+			if (!element) return;
 			try {
-				console.log('PMRichEditor: initializing TipTap editor');
 				editor = new Editor({
 					element,
 					extensions: getPMExtensions(placeholder),
@@ -101,15 +89,10 @@
 					},
 					onCreate: () => {
 						editorReady = true;
-						console.log('PMRichEditor: TipTap editor initialized successfully');
-					},
-					onDestroy: () => {
-						console.log('PMRichEditor: TipTap editor destroyed');
 					}
 				});
 			} catch (err) {
 				console.error('PMRichEditor: TipTap init failed', err);
-				initError = `编辑器初始化失败：${err instanceof Error ? err.message : '未知错误'}`;
 				isFallback = true;
 			}
 		});
@@ -123,7 +106,7 @@
 			if (editor && !editor.isDestroyed && !isFallback) {
 				const currentHTML = editor.getHTML();
 				if (newContent !== currentHTML) {
-					editor.commands.setContent(newContent || '<p></p>', { emitUpdate: false });
+					editor.commands.setContent(newContent || '<p></p>', false);
 				}
 			}
 			if (isFallback) {
