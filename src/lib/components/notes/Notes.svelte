@@ -2,6 +2,14 @@
 	import { marked } from 'marked';
 	import { toast } from 'svelte-sonner';
 	import fileSaver from 'file-saver';
+	import TurndownService from 'turndown';
+	import { gfm } from '@joplin/turndown-plugin-gfm';
+
+	const turndownService = new TurndownService({
+		codeBlockStyle: 'fenced',
+		headingStyle: 'atx'
+	});
+	turndownService.use(gfm);
 
 	const { saveAs } = fileSaver;
 
@@ -116,47 +124,120 @@
 	};
 
 	const inputFilesHandler = async (inputFiles) => {
-		// Check if all the file is a markdown file and extract name and content
-
 		for (const file of inputFiles) {
-			if (file.type !== 'text/markdown') {
-				toast.error($i18n.t('Only markdown files are allowed'));
+			const fileName = file.name.toLowerCase();
+
+			if (file.type === 'text/markdown' || fileName.endsWith('.md')) {
+				// Handle markdown files
+				const reader = new FileReader();
+				reader.onload = async (event) => {
+					const content = event.target.result;
+					let name = file.name.replace(/\.md$/i, '');
+
+					if (typeof content !== 'string') {
+						toast.error($i18n.t('Invalid file content'));
+						return;
+					}
+
+					const res = await createNewNote(localStorage.token, {
+						title: name,
+						data: {
+							content: {
+								json: null,
+								html: marked.parse(content ?? ''),
+								md: content
+							}
+						},
+						meta: null,
+						access_grants: []
+					}).catch((error) => {
+						toast.error(`${error}`);
+						return null;
+					});
+
+					if (res) {
+						init();
+					}
+				};
+				reader.readAsText(file);
+			} else if (file.type === 'text/plain' || fileName.endsWith('.txt')) {
+				// Handle plain text files
+				const reader = new FileReader();
+				reader.onload = async (event) => {
+					const content = event.target.result;
+					let name = file.name.replace(/\.txt$/i, '');
+
+					if (typeof content !== 'string') {
+						toast.error($i18n.t('Invalid file content'));
+						return;
+					}
+
+					const res = await createNewNote(localStorage.token, {
+						title: name,
+						data: {
+							content: {
+								json: null,
+								html: marked.parse(content ?? ''),
+								md: content
+							}
+						},
+						meta: null,
+						access_grants: []
+					}).catch((error) => {
+						toast.error(`${error}`);
+						return null;
+					});
+
+					if (res) {
+						init();
+					}
+				};
+				reader.readAsText(file);
+			} else if (
+				file.type ===
+					'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+				fileName.endsWith('.docx')
+			) {
+				// Handle docx files using mammoth
+				const mammoth = await import('mammoth');
+				const reader = new FileReader();
+				reader.onload = async (event) => {
+					const arrayBuffer = event.target.result;
+					let name = file.name.replace(/\.docx$/i, '');
+
+					try {
+						const result = await mammoth.convertToHtml({ arrayBuffer });
+						const htmlContent = result.value;
+						const mdContent = turndownService.turndown(htmlContent);
+
+						const res = await createNewNote(localStorage.token, {
+							title: name,
+							data: {
+								content: {
+									json: null,
+									html: htmlContent,
+									md: mdContent
+								}
+							},
+							meta: null,
+							access_grants: []
+						}).catch((error) => {
+							toast.error(`${error}`);
+							return null;
+						});
+
+						if (res) {
+							init();
+						}
+					} catch (error) {
+						toast.error($i18n.t('Failed to import DOCX file: {{error}}', { error: error.message }));
+					}
+				};
+				reader.readAsArrayBuffer(file);
+			} else {
+				toast.error($i18n.t('Only markdown, text, and docx files are allowed'));
 				return;
 			}
-
-			const reader = new FileReader();
-			reader.onload = async (event) => {
-				const content = event.target.result;
-				let name = file.name.replace(/\.md$/, '');
-
-				if (typeof content !== 'string') {
-					toast.error($i18n.t('Invalid file content'));
-					return;
-				}
-
-				// Create a new note with the content
-				const res = await createNewNote(localStorage.token, {
-					title: name,
-					data: {
-						content: {
-							json: null,
-							html: marked.parse(content ?? ''),
-							md: content
-						}
-					},
-					meta: null,
-					access_grants: []
-				}).catch((error) => {
-					toast.error(`${error}`);
-					return null;
-				});
-
-				if (res) {
-					init();
-				}
-			};
-
-			reader.readAsText(file);
 		}
 	};
 

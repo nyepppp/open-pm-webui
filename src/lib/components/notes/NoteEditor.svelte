@@ -350,6 +350,7 @@ ${content}
 
 	const stopResponseHandler = async () => {
 		stopResponseFlag = true;
+		editing = false;
 		console.log('stopResponse', stopResponseFlag);
 	};
 
@@ -727,6 +728,9 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 					console.log(error);
 				}
 			}
+		} else {
+			editing = false;
+			streaming = false;
 		}
 
 		streaming = false;
@@ -1208,7 +1212,7 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 							image={true}
 							{files}
 							placeholder={$i18n.t('Write something...')}
-							editable={versionIdx === null && !editing && note?.write_access}
+							editable={versionIdx === null && !editing && (note?.write_access ?? true)}
 							onSelectionUpdate={({ editor }) => {
 								const { from, to } = editor.state.selection;
 								const selectedText = editor.state.doc.textBetween(from, to, ' ');
