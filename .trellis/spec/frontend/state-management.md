@@ -116,3 +116,64 @@ Keep state local when:
 2. **Not resetting stores** — Always export and call `reset*Store()` on project change.
 3. **Mutating store value directly** — Use `.set()` or `.update()`.
 4. **Duplicating URL state in stores** — If it's in `$page.params`, don't also store it.
+
+---
+
+## Version ID Resolution Pattern
+
+When resolving a version display from a module entry, always follow this chain:
+
+```svelte
+<!-- Table column: currentVersionNumber -->
+{@const cvn = entry.currentVersionNumber}
+{@const entryVid = entry.versionId || getEntryData(entry, 'versionId')}
+{@const isUuid = cvn && /^[0-9a-f]{8}-/i.test(String(cvn))}
+{@const resolvedVid = isUuid ? cvn : entryVid}
+{@const matchedVersion = resolvedVid ? $versionList.find((v: any) => v.id === resolvedVid) : null}
+{@const displayVn = matchedVersion ? (matchedVersion.versionNumber || matchedVersion.version_number) : (!isUuid && cvn ? cvn : '')}
+```
+
+```svelte
+<!-- Card badge: versionId -->
+{@const cardVersionId = getEntryData(entry, 'versionId') || entry.versionId || (entry.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(entry.currentVersionNumber)) ? entry.currentVersionNumber : '')}
+{@const cardVersion = cardVersionId ? $versionList.find((v: any) => v.id === cardVersionId) : null}
+{cardVersion?.versionNumber || cardVersion?.version_number || '-'}
+```
+
+**Resolution chain** (in priority order):
+1. `getEntryData(entry, 'versionId')` — from `entry.data.versionId` or `entry.metadata.versionId` (JSON column)
+2. `entry.versionId` — top-level field (may be undefined if backend doesn't return it)
+3. `entry.currentVersionNumber` — if it's a UUID format, use as versionId lookup
+
+**Display fallback**: Always use `versionNumber || version_number` since the API field name varies between `versionNumber` (camelCase) and `version_number` (snake_case).
+
+### Don't: Only check one source for version ID
+
+```svelte
+// Bad — only checks currentVersionNumber, shows UUID or '-' when empty
+{@const displayVn = entry.currentVersionNumber}
+```
+
+```svelte
+// Bad — only checks data.versionId, misses entries with UUID in currentVersionNumber
+{@const vid = getEntryData(entry, 'versionId')}
+{@const vn = vid ? $versionList.find(v => v.id === vid)?.versionNumber : null}
+```
+
+### handleCreate: Always persist versionId in data
+
+For `handleCreate`, ensure `data.data.versionId` is set for **all** module types, including rich editor types (meeting, prd) that don't set `data.data` in their module-specific blocks:
+
+```typescript
+const currentVer = $currentVersion;
+if (currentVer?.id) {
+    data.versionId = currentVer.id;
+    if (data.data && typeof data.data === 'object') {
+        (data.data as Record<string, unknown>).versionId = currentVer.id;
+    } else {
+        data.data = { versionId: currentVer.id };
+    }
+}
+```
+
+**Why**: The top-level `data.versionId` is silently discarded by the backend (not in `PMEntryForm`). Version association is persisted through `data.data.versionId` (JSON column), which is what `getEntryData()` reads.
