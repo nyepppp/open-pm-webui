@@ -203,6 +203,8 @@ class PMEntryModel(BaseModel):
     status: str = 'draft'
     priority: Optional[str] = None
     version: int = 1
+    current_version_number: Optional[str] = None  # computed from latest entry version
+    branch_name: Optional[str] = None              # computed from latest entry version
     created_at: int
     updated_at: int
 
@@ -583,6 +585,28 @@ class PMEntryVersions:
     ) -> Optional[PMEntryVersionModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(PMEntryVersion).where(PMEntryVersion.id == version_id))
+            version = result.scalar_one_or_none()
+            return PMEntryVersionModel.model_validate(version) if version else None
+
+    async def get_versions_by_project_version_id(
+        self, project_version_id: str, db: Optional[AsyncSession] = None
+    ) -> list[PMEntryVersionModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(PMEntryVersion).where(PMEntryVersion.project_version_id == project_version_id)
+            )
+            return [PMEntryVersionModel.model_validate(v) for v in result.scalars().all()]
+
+    async def get_latest_version_by_entry_id(
+        self, entry_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[PMEntryVersionModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(PMEntryVersion)
+                .where(PMEntryVersion.entry_id == entry_id)
+                .order_by(PMEntryVersion.created_at.desc())
+                .limit(1)
+            )
             version = result.scalar_one_or_none()
             return PMEntryVersionModel.model_validate(version) if version else None
 

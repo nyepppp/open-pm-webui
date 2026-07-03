@@ -16,7 +16,7 @@
 	import PMSaveVersionDialog from '$lib/components/pm/PMSaveVersionDialog.svelte';
 	import { createEntryVersion } from '$lib/apis/pm/version';
 	import { marked } from 'marked';
-	import type { ModuleType, ModuleStatus, Priority, PRDSection, MindMapNode } from '$lib/apis/pm/types';
+	import type { ModuleType, ModuleStatus, Priority, PRDSection, MindMapNode, ModuleEntry } from '$lib/apis/pm/types';
 	import PMMindMap from '$lib/components/pm/PMMindMap.svelte';
 	import PMTraceabilityGraph from '$lib/components/pm/PMTraceabilityGraph.svelte';
 	import PMAgentChatPanel from '$lib/components/pm/PMAgentChatPanel.svelte';
@@ -37,6 +37,7 @@
 			{ key: 'description', label: '描述', width: 'w-32' },
 			{ key: 'source', label: '来源', width: 'w-16' }, { key: 'category', label: '分类', width: 'w-20' },
 			{ key: 'userRole', label: '用户角色', width: 'w-20' }, { key: 'tags', label: '标签', width: 'w-24' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		parameter: { name: '参数配置', editorType: 'table', tableColumns: [
@@ -46,6 +47,7 @@
 			{ key: 'required', label: '必填', width: 'w-12' }, { key: 'description', label: '描述', width: 'w-24' },
 			{ key: 'sourceDocument', label: '来源', width: 'w-20' }, { key: 'moduleName', label: '所属模块', width: 'w-20' },
 			{ key: 'featureName', label: '所属功能', width: 'w-20' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }
 		]},
 		testcase: { name: '测试用例', editorType: 'table', tableColumns: [
@@ -54,6 +56,7 @@
 			{ key: 'precondition', label: '前置条件', width: 'w-24' }, { key: 'steps', label: '步骤', width: 'w-24' },
 			{ key: 'expectedResult', label: '预期结果', width: 'w-24' },
 			{ key: 'requirementId', label: '关联需求', width: 'w-20' }, { key: 'featureName', label: '关联功能', width: 'w-20' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		prd: { name: 'PRD 文档', editorType: 'rich' },
@@ -71,7 +74,7 @@
 			{ key: 'title', label: '节点名称' }, { key: 'description', label: '描述', width: 'w-32' },
 			{ key: 'nodeType', label: '类型', width: 'w-20' },
 			{ key: 'nodeStatus', label: '状态', width: 'w-20' },
-			{ key: 'versionId', label: '版本', width: 'w-16' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'startDate', label: '开始', width: 'w-24' },
 			{ key: 'endDate', label: '结束', width: 'w-24' }, { key: 'dependencies', label: '依赖', width: 'w-24' },
 			{ key: 'updatedAt', label: '更新', width: 'w-24' }
@@ -90,6 +93,7 @@
 		prototype: { name: '原型/UI设计', editorType: 'table', tableColumns: [
 			{ key: 'priority', label: '优先级', width: 'w-16' }, { key: 'title', label: '名称' },
 			{ key: 'protoType', label: '类型', width: 'w-20' }, { key: 'description', label: '描述', width: 'w-32' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		schedule: { name: '项目排期', editorType: 'table', tableColumns: [
@@ -97,12 +101,13 @@
 			{ key: 'assignee', label: '负责人', width: 'w-20' },
 			{ key: 'startDate', label: '开始', width: 'w-24' }, { key: 'endDate', label: '结束', width: 'w-24' },
 			{ key: 'progress', label: '进度', width: 'w-16' }, { key: 'isMilestone', label: '里程碑', width: 'w-16' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]}
 	};
 
 	let config = $derived(moduleConfig[moduleType] || { name: '未知模块', editorType: 'rich' as EditorType });
-	let entries = $state<any[]>([]);
+	let entries = $state<ModuleEntry[]>([]);
 	let isLoading = $state(true);
 	let loadError = $state('');
 	let query = $state('');
@@ -598,7 +603,7 @@
 				html = result.value;
 			} else if (ext === 'md' || ext === 'markdown' || ext === 'txt') {
 				const text = await file.text();
-				html = marked.parse(text) as string;
+				html = await marked.parse(text) as string;
 			} else {
 				toast.info('不支持的文件格式，请使用 .md / .txt / .docx / .doc');
 				if (mdFileInput) mdFileInput.value = '';
@@ -1232,7 +1237,6 @@
 				<table class="w-full text-sm">
 					<thead><tr class="border-b border-gray-100 dark:border-gray-800">
 						{#if config.tableColumns}{#each config.tableColumns as col (col.key)}<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase {col.width || ''}">{col.label}</th>{/each}{/if}
-						<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-16">版本</th>
 						<th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">操作</th>
 					</tr></thead>
 					<tbody>{#each pagedEntries as entry (entry.id)}
@@ -1300,6 +1304,16 @@
 									{:else if col.key === 'nodeStatus'}
 										{@const ns = getEntryData(entry, 'nodeStatus')}
 										<span class="px-1.5 py-0.5 rounded text-xs {nodeStatusMap[ns]?.c || INACTIVE}">{nodeStatusMap[ns]?.l || ns || '-'}</span>
+									{:else if col.key === 'currentVersionNumber'}
+										{@const cvn = entry.currentVersionNumber}
+										{#if cvn}
+											<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{cvn}</span>
+											{#if entry.branchName && entry.branchName !== 'main'}
+												<span class="ml-1 px-1 py-0.5 rounded text-[10px] bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400">{entry.branchName}</span>
+											{/if}
+										{:else}
+											<span class="text-xs text-gray-400">-</span>
+										{/if}
 									{:else if col.key === 'versionId'}
 										{@const vid = getEntryData(entry, 'versionId')}
 										{#if vid}<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{$versionList.find((v: any) => v.id === vid)?.versionNumber || vid}</span>{:else}<span class="text-xs text-gray-400">-</span>{/if}
@@ -1334,15 +1348,6 @@
 									{/if}
 								</td>
 							{/each}{/if}
-							<td class="px-4 py-2.5">
-								{#if true}
-									{@const creationVersionId = getEntryData(entry, 'versionId')}
-									{@const creationVersion = creationVersionId ? $versionList.find((v: any) => v.id === creationVersionId) : null}
-									<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded-full {creationVersion ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400'}">
-										{creationVersion?.versionNumber || creationVersion?.version_number || '-'}
-									</span>
-								{/if}
-							</td>
 							<td class="px-4 py-2.5 text-right"><div class="flex items-center justify-end gap-1">
 								{#if moduleType === 'roadmap' || moduleType === 'schedule'}
 									<button class="p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition" title="同步到日程" onclick={() => syncSingleToCalendar(entry)}>
@@ -1698,8 +1703,8 @@
 								<option value="delayed">延期</option>
 							</select>
 						</div>
-								{:else}
-									<input
+					{:else}
+						<input
 										type="text"
 										class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500"
 										value={getEntryData(editingEntry, field.key)}
@@ -1909,46 +1914,7 @@
 							showToc={true}
 						/>
 					</div>
-			{:else if moduleType === 'prototype'}
-				<div>
-					<label class="block text-xs font-medium text-gray-500 mb-1">类型</label>
-					<select class="w-full text-sm px-2 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg outline-hidden" value={getEntryData(editDrawerEntry, 'protoType')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.protoType = (e.target as HTMLSelectElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }}>
-						<option value="image">图片</option>
-						<option value="package">文件包</option>
-						<option value="review">评审记录</option>
-					</select>
-				</div>
-				{#if getEntryData(editDrawerEntry, 'protoType') === 'review'}
-				<div>
-					<label class="block text-xs font-medium text-gray-500 mb-1">评审结果</label>
-					<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden resize-none focus:ring-2 focus:ring-blue-500" rows="3" value={editContent} oninput={(e) => { editContent = (e.target as HTMLTextAreaElement).value; }}></textarea>
-				</div>
 				{/if}
-			{:else if moduleType === 'schedule'}
-				<div>
-					<label class="block text-xs font-medium text-gray-500 mb-1">负责人</label>
-					<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'assignee')} oninput={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.assignee = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
-				</div>
-				<div class="flex gap-2">
-					<div class="flex-1">
-						<label class="block text-xs font-medium text-gray-500 mb-1">开始日期</label>
-						<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'startDate')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.startDate = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
-					</div>
-					<div class="flex-1">
-						<label class="block text-xs font-medium text-gray-500 mb-1">结束日期</label>
-						<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'endDate')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.endDate = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
-					</div>
-				</div>
-				<div class="flex gap-2">
-					<div class="flex-1">
-						<label class="block text-xs font-medium text-gray-500 mb-1">进度</label>
-						<input type="number" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" min="0" max="100" value={getEntryData(editDrawerEntry, 'progress') || 0} oninput={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.progress = Number((e.target as HTMLInputElement).value) || 0; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
-					</div>
-					<div class="flex items-end pb-2">
-						<label class="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" checked={getEntryData(editDrawerEntry, 'isMilestone')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.isMilestone = (e.target as HTMLInputElement).checked; editDrawerEntry = { ...editDrawerEntry, data: d }; }} /> 里程碑</label>
-					</div>
-				</div>
-			{/if}
 			</div>
 		</div>
 	</div>
@@ -2081,6 +2047,45 @@
 				<div>
 					<label class="block text-xs font-medium text-gray-500 mb-1">默认值</label>
 					<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'defaultValue')} oninput={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.defaultValue = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
+				</div>
+			{:else if moduleType === 'prototype'}
+				<div>
+					<label class="block text-xs font-medium text-gray-500 mb-1">类型</label>
+					<select class="w-full text-sm px-2 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg outline-hidden" value={getEntryData(editDrawerEntry, 'protoType')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.protoType = (e.target as HTMLSelectElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }}>
+						<option value="image">图片</option>
+						<option value="package">文件包</option>
+						<option value="review">评审记录</option>
+					</select>
+				</div>
+				{#if getEntryData(editDrawerEntry, 'protoType') === 'review'}
+				<div>
+					<label class="block text-xs font-medium text-gray-500 mb-1">评审结果</label>
+					<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden resize-none focus:ring-2 focus:ring-blue-500" rows="3" value={editContent} oninput={(e) => { editContent = (e.target as HTMLTextAreaElement).value; }}></textarea>
+				</div>
+				{/if}
+			{:else if moduleType === 'schedule'}
+				<div>
+					<label class="block text-xs font-medium text-gray-500 mb-1">负责人</label>
+					<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'assignee')} oninput={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.assignee = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
+				</div>
+				<div class="flex gap-2">
+					<div class="flex-1">
+						<label class="block text-xs font-medium text-gray-500 mb-1">开始日期</label>
+						<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'startDate')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.startDate = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
+					</div>
+					<div class="flex-1">
+						<label class="block text-xs font-medium text-gray-500 mb-1">结束日期</label>
+						<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={getEntryData(editDrawerEntry, 'endDate')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.endDate = (e.target as HTMLInputElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
+					</div>
+				</div>
+				<div class="flex gap-2">
+					<div class="flex-1">
+						<label class="block text-xs font-medium text-gray-500 mb-1">进度</label>
+						<input type="number" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" min="0" max="100" value={getEntryData(editDrawerEntry, 'progress') || 0} oninput={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.progress = Number((e.target as HTMLInputElement).value) || 0; editDrawerEntry = { ...editDrawerEntry, data: d }; }} />
+					</div>
+					<div class="flex items-end pb-2">
+						<label class="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" checked={getEntryData(editDrawerEntry, 'isMilestone')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.isMilestone = (e.target as HTMLInputElement).checked; editDrawerEntry = { ...editDrawerEntry, data: d }; }} /> 里程碑</label>
+					</div>
 				</div>
 			{/if}
 			<div>

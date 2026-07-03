@@ -144,8 +144,20 @@ async def get_entries(
     db: AsyncSession = Depends(get_async_session),
 ):
     if module_type:
-        return await PMEntries.get_entries_by_project_and_module(project_id, module_type, db=db)
-    return await PMEntries.get_entries_by_project_id(project_id, db=db)
+        entries = await PMEntries.get_entries_by_project_and_module(project_id, module_type, db=db)
+    else:
+        entries = await PMEntries.get_entries_by_project_id(project_id, db=db)
+    # Enrich with version info
+    from open_webui.models.pm import PMEntryVersions
+    result = []
+    for entry in entries:
+        entry_model = PMEntryModel.model_validate(entry)
+        latest_version = await PMEntryVersions.get_latest_version_by_entry_id(entry.id, db=db)
+        if latest_version:
+            entry_model.current_version_number = latest_version.version_number
+            entry_model.branch_name = latest_version.branch_name
+        result.append(entry_model)
+    return result
 
 
 @router.post('/projects/{project_id}/entries', response_model=PMEntryModel)
@@ -169,15 +181,34 @@ async def create_entry(
             name=form_data.title,
             module_id=form_data.module_type,
             entry_id=entry.id,
-            metadata=form_data.data,
+            entity_metadata=form_data.data,
         )
         await PMEntities.insert_new_entity(user.id, entity_form, db=db)
     except Exception as e:
         # Don't fail entry creation if entity creation fails
-        import logging
-        logging.getLogger(__name__).warning(f'Failed to auto-create entity for entry {entry.id}: {e}')
-    
-    return entry
+        log.warning(f'Failed to auto-create entity for entry {entry.id}: {e}')
+
+    # Auto-create initial entry version (v1)
+    try:
+        from open_webui.models.pm import PMEntryVersions, PMEntryVersionForm
+        version_form = PMEntryVersionForm(
+            entry_id=entry.id,
+            project_id=project_id,
+            module_type=form_data.module_type,
+            version_number='v1',
+            content=entry.content,
+            entry_metadata=form_data.data,
+            change_summary='Initial version',
+        )
+        await PMEntryVersions.insert_new_version(user.id, version_form, db=db)
+    except Exception as e:
+        log.warning(f'Failed to auto-create entry version for entry {entry.id}: {e}')
+
+    # Enrich response with version info
+    entry_response = PMEntryModel.model_validate(entry)
+    entry_response.current_version_number = 'v1'
+    entry_response.branch_name = 'main'
+    return entry_response
 
 
 @router.get('/entries/{entry_id}', response_model=PMEntryModel)
@@ -271,7 +302,7 @@ async def create_entry_version(
         module_type=entry.module_type,
         version_number=version_number,
         content=entry.content,
-        metadata=entry.data,
+        entry_metadata=entry.data,
         branch_name=form_data.get('branch_name', 'main'),
         change_summary=form_data.get('change_summary', ''),
         project_version_id=form_data.get('project_version_id'),
@@ -311,7 +342,7 @@ async def switch_entry_version(
     # Restore entry content from version
     await PMEntries.update_entry_by_id(
         entry_id,
-        PMEntryUpdateForm(content=version.content, data=version.metadata),
+        PMEntryUpdateForm(content=version.content, data=version.entry_metadata),
         db=db
     )
     return {'entry_id': entry_id, 'current_version_id': version_id}
@@ -1174,13 +1205,15 @@ async def get_project_version_entries(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get all entries associated with a project version."""
-    entries = await PMEntries.get_entries_by_project_id(project_id, db=db)
-    version_entries = []
-    for entry in entries:
-        entry_data = entry.data or {}
-        if entry_data.get('versionId') == version_id:
-            version_entries.append(entry)
-    return version_entries
+    from open_webui.models.pm import PMEntryVersions
+    entry_versions = await PMEntryVersions.get_versions_by_project_version_id(version_id, db=db)
+    entry_ids = list({v.entry_id for v in entry_versions})
+    entries = []
+    for eid in entry_ids:
+        entry = await PMEntries.get_entry_by_id(eid, db=db)
+        if entry:
+            entries.append(entry)
+    return entries
 
 
 @router.post('/projects/{project_id}/versions/{version_id}/snapshot', response_model=dict)
@@ -1191,17 +1224,21 @@ async def create_project_version_snapshot(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Create a snapshot of all current entries for a project version."""
-    from open_webui.models.pm import PMEntryVersions
+    from open_webui.models.pm import PMEntryVersions, PMEntryVersionForm
     entries = await PMEntries.get_entries_by_project_id(project_id, db=db)
     snapshots = []
     for entry in entries:
+        # Derive version_number from the entry's latest version, or use 'v1' as default
+        latest_version = await PMEntryVersions.get_latest_version_by_entry_id(entry.id, db=db)
+        version_number = latest_version.version_number if latest_version else 'v1'
         version_form = PMEntryVersionForm(
             entry_id=entry.id,
             project_id=project_id,
             module_type=entry.module_type,
-            version_number=version_id,
+            version_number=version_number,
             content=entry.content,
-            metadata={**(entry.data or {}), 'projectVersionId': version_id},
+            entry_metadata=entry.data,
+            project_version_id=version_id,
             change_summary=f'Snapshot for project version {version_id}',
         )
         version = await PMEntryVersions.insert_new_version(user.id, version_form, db=db)
