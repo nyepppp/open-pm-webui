@@ -1,12 +1,12 @@
 # Frontend Development Guidelines
 
-> Best practices for frontend development in this project.
+> Best practices for frontend development — extracted from actual code patterns.
 
 ---
 
 ## Overview
 
-This directory contains guidelines for frontend development. Fill in each file with your project's specific conventions.
+The frontend is a **SvelteKit (Svelte 5)** application with **Tailwind CSS** and **bits-ui** components. The PM module demonstrates all core patterns: API layer, stores, components, routing, and form handling.
 
 ---
 
@@ -14,25 +14,18 @@ This directory contains guidelines for frontend development. Fill in each file w
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
+| [Directory Structure](./directory-structure.md) | Module organization and file layout | ✅ Documented |
+| [Component Guidelines](./component-guidelines.md) | Svelte 5 runes, props, composition | ✅ Documented |
+| [Hook Guidelines](./hook-guidelines.md) | Data fetching, effects, lifecycle | ✅ Documented |
+| [State Management](./state-management.md) | Svelte stores, runes, derived state | ✅ Documented |
+| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | ✅ Documented |
+| [Type Safety](./type-safety.md) | TypeScript types, validation | ✅ Documented |
 
 ---
 
-## How to Fill These Guidelines
+## How These Were Created
 
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
+Each guideline was extracted by inspecting the actual codebase — `src/lib/components/pm/`, `src/lib/apis/pm/`, `src/lib/stores/pm/`, and `src/routes/(app)/pm/`. No aspirational patterns are included; only patterns with existing code examples.
 
 ---
 

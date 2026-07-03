@@ -1,0 +1,6 @@
+{"path": ".trellis/tasks/07-03-pm-version-unification/prd.md", "reason": "Acceptance criteria for all 3 version bugs"}
+{"path": ".trellis/spec/backend/error-handling.md", "reason": "Verify auto-version creation follows non-blocking exception pattern"}
+{"path": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify new query method follows PMEntryVersions static method pattern"}
+{"path": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify version column rendering uses Svelte 5 runes and Tailwind dark: variants"}
+{"path": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify API client calls use helper functions, not raw fetch"}
+{"path": ".trellis/spec/frontend/type-safety.md", "reason": "Verify currentVersionNumber field is properly typed, not cast with 'as any'"}

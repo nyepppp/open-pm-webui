@@ -1,51 +1,66 @@
 # Logging Guidelines
 
-> How logging is done in this project.
+> Structured logging patterns — extracted from `routers/pm.py` and `routers/chats.py`.
 
 ---
 
-## Overview
+## Logger Setup
 
-<!--
-Document your project's logging conventions here.
+Use Python's stdlib `logging` module. Create one logger per module:
 
-Questions to answer:
-- What logging library do you use?
-- What are the log levels and when to use each?
-- What should be logged?
-- What should NOT be logged (PII, secrets)?
--->
-
-(To be filled by the team)
+```python
+import logging
+log = logging.getLogger(__name__)
+```
 
 ---
 
 ## Log Levels
 
-<!-- When to use each level: debug, info, warn, error -->
-
-(To be filled by the team)
+| Level | When to Use | Example |
+|-------|-------------|---------|
+| `log.error()` | Operation failure that affects the request | `log.error(f'LLM call failed: {e}')` |
+| `log.warning()` | Non-critical failure, graceful degradation | `log.warning(f'Failed to auto-create entity for entry {entry.id}: {e}')` |
+| `log.info()` | Significant state changes (rarely used in PM) | — |
+| `log.debug()` | Verbose diagnostic info (not used currently) | — |
 
 ---
 
-## Structured Logging
+## Formatting Conventions
 
-<!-- Log format, required fields -->
+- Use f-strings with descriptive prefixes.
+- Include entity IDs for traceability.
 
-(To be filled by the team)
+```python
+# Good
+log.error(f'LLM call failed: {e}')
+log.warning(f'Failed to auto-create entity for entry {entry.id}: {e}')
+
+# Bad — no context
+log.error(str(e))
+log.warning('something failed')
+```
 
 ---
 
 ## What to Log
 
-<!-- Important events to log -->
-
-(To be filled by the team)
+- **LLM call failures** — always at `error` level.
+- **Graceful degradation failures** — always at `warning` level.
+- **Database operation failures** — logged by the caller after raising `HTTPException`.
 
 ---
 
 ## What NOT to Log
 
-<!-- Sensitive data, PII, secrets -->
+- **Full request bodies** — may contain user content.
+- **Authentication tokens** — never log `user.id` in production unless debugging.
+- **Full LLM responses** — may be large; log only failure info.
 
-(To be filled by the team)
+---
+
+## Common Mistakes
+
+1. **Using `print()` instead of `log`** — Always use the logger.
+2. **Importing logging inside functions** — The PM router has `import logging` inside a try/except block as a one-off; the convention is to import at module level.
+3. **Not including the entity ID** — Makes debugging impossible in multi-user scenarios.

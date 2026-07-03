@@ -59,7 +59,7 @@
 			}
 
 			if (html && editor) {
-				editor.commands.setContent(html, true);
+				editor.commands.setContent(html, { emitUpdate: true });
 				onImported?.();
 				toast.success('文档导入成功');
 			}

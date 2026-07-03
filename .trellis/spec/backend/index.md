@@ -1,12 +1,12 @@
 # Backend Development Guidelines
 
-> Best practices for backend development in this project.
+> Best practices for backend development in this project — extracted from actual code patterns.
 
 ---
 
 ## Overview
 
-This directory contains guidelines for backend development. Fill in each file with your project's specific conventions.
+The backend is a **FastAPI + SQLAlchemy async** application. The PM module follows the same patterns as the core OpenWebUI routers (chats, users, configs, etc.). All guidelines below are backed by real code examples, not aspirational ideals.
 
 ---
 
@@ -14,24 +14,17 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Directory Structure](./directory-structure.md) | Module organization and file layout | ✅ Documented |
+| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | ✅ Documented |
+| [Error Handling](./error-handling.md) | HTTP errors, validation, client responses | ✅ Documented |
+| [Quality Guidelines](./quality-guidelines.md) | Code standards, test patterns | ✅ Documented |
+| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | ✅ Documented |
 
 ---
 
-## How to Fill These Guidelines
+## How These Were Created
 
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
+Each guideline was extracted by inspecting the actual codebase — `routers/pm.py`, `routers/chats.py`, `models/pm.py`, `internal/db.py`, and `backend/tests/`. No aspirational patterns are included; only patterns with existing code examples.
 
 ---
 

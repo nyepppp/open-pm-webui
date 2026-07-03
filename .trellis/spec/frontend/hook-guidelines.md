@@ -1,51 +1,111 @@
 # Hook Guidelines
 
-> How hooks are used in this project.
+> Data fetching and lifecycle patterns — extracted from actual PM components.
 
 ---
 
-## Overview
+## Data Fetching Pattern
 
-<!--
-Document your project's hook conventions here.
+No custom hooks are used. Data fetching follows a **load-on-mount** pattern:
 
-Questions to answer:
-- What custom hooks do you have?
-- How do you handle data fetching?
-- What are the naming conventions?
-- How do you share stateful logic?
--->
+```svelte
+<script lang="ts">
+    import { onMount } from 'svelte';
 
-(To be filled by the team)
+    let items = $state<ModuleEntry[]>([]);
+    let loading = $state(false);
+    let error = $state('');
 
----
+    onMount(async () => {
+        loading = true;
+        try {
+            items = await getEntries(token, projectId, moduleType);
+        } catch (e) {
+            error = e.message;
+        } finally {
+            loading = false;
+        }
+    });
+</script>
+```
 
-## Custom Hook Patterns
-
-<!-- How to create and structure custom hooks -->
-
-(To be filled by the team)
-
----
-
-## Data Fetching
-
-<!-- How data fetching is handled (React Query, SWR, etc.) -->
-
-(To be filled by the team)
+**Convention**: No React-style custom hooks (`useXxx`). Svelte 5 uses `$state` + `onMount` + async functions.
 
 ---
 
-## Naming Conventions
+## Effect Patterns
 
-<!-- Hook naming rules (use*, etc.) -->
+### Reacting to prop changes
 
-(To be filled by the team)
+```svelte
+$effect(() => {
+    // React to projectId change
+    if (projectId) {
+        loadData(projectId);
+    }
+});
+```
+
+### Reacting to URL params
+
+```svelte
+<script lang="ts">
+    import { page } from '$app/stores';
+    let projectId = $derived($page.params.projectId);
+    let moduleType = $derived($page.params.module as ModuleType);
+</script>
+```
+
+### Cleanup
+
+```svelte
+$effect(() => {
+    const observer = new ResizeObserver(...);
+    observer.observe(element);
+    return () => observer.disconnect();
+});
+```
+
+---
+
+## Toast Notifications
+
+Use `svelte-sonner` for user feedback:
+
+```svelte
+import { toast } from 'svelte-sonner';
+
+// Success
+toast.success('条目已保存');
+
+// Error
+toast.error('保存失败: ' + error.message);
+```
+
+---
+
+## Navigation
+
+Use SvelteKit's `$app/stores` and `goto`:
+
+```svelte
+import { goto } from '$app/navigation';
+import { page } from '$app/stores';
+
+// Read params
+let projectId = $derived($page.params.projectId);
+
+// Navigate
+function navigateToEntry(moduleType: string, entryId: string) {
+    goto(`/pm/${projectId}/${moduleType}?entryId=${entryId}`);
+}
+```
 
 ---
 
 ## Common Mistakes
 
-<!-- Hook-related mistakes your team has made -->
-
-(To be filled by the team)
+1. **Not using `onMount` for initial data fetch** — Component renders before data loads; show loading state.
+2. **$effect without cleanup** — ResizeObserver, event listeners, and intervals must be cleaned up.
+3. **Direct DOM manipulation** — Use Svelte reactivity instead of `document.querySelector`.
+4. **Fetching in `$effect` without guard** — Use `if (projectId)` to prevent fetch with undefined params.
