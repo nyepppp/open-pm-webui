@@ -37,16 +37,16 @@
 			: 'light'}
 	nodesConnectable={false}
 	nodesDraggable={false}
-	on:nodeclick={(e) => dispatch('nodeclick', e.detail)}
+	onnodeclick={(e) => dispatch('nodeclick', e.detail)}
 	oninit={() => {
 		console.log('Flow initialized');
 	}}
 >
 	<Controls showLock={false}>
-		<ControlButton on:click={() => setLayoutDirection('vertical')} title="Vertical Layout">
+		<ControlButton onclick={() => setLayoutDirection('vertical')} title="Vertical Layout">
 			<AlignVertical className="size-4" />
 		</ControlButton>
-		<ControlButton on:click={() => setLayoutDirection('horizontal')} title="Horizontal Layout">
+		<ControlButton onclick={() => setLayoutDirection('horizontal')} title="Horizontal Layout">
 			<AlignHorizontal className="size-4" />
 		</ControlButton>
 	</Controls>

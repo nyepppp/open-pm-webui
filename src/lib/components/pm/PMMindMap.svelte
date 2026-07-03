@@ -124,8 +124,12 @@
 	});
 
 	// Use filtered for large graphs, full for small
-	let displayNodes = $derived(isLargeGraph ? $filteredNodes : $allNodes);
-	let displayEdges = $derived(isLargeGraph ? $filteredEdges : $allEdges);
+	let displayNodes = writable<Node[]>([]);
+	let displayEdges = writable<Edge[]>([]);
+	$effect(() => {
+		displayNodes.set(isLargeGraph ? $filteredNodes : $allNodes);
+		displayEdges.set(isLargeGraph ? $filteredEdges : $allEdges);
+	});
 
 	// Update when props change
 	$effect(() => {
@@ -278,11 +282,11 @@
 	<!-- Mind Map Canvas -->
 	<div class="flex-1 relative">
 		<SvelteFlow
-			nodes={displayNodes}
-			edges={displayEdges}
-			on:nodeClick={handleNodeClick}
-			on:paneClick={handlePaneClick}
-			on:viewportChange={handleViewportChange}
+			nodes={$displayNodes}
+			edges={$displayEdges}
+			onnodeclick={handleNodeClick}
+			onpaneclick={handlePaneClick}
+			onviewportchange={handleViewportChange}
 			fitView={fitViewOnLoad}
 			nodesDraggable={!readonly}
 			nodesConnectable={!readonly}

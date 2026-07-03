@@ -259,3 +259,82 @@
 **Total Tasks**: 90
 **MVP Tasks (P1 only)**: 62 (Phases 1-5)
 **Estimated Duration**: 4-6 weeks (MVP), 6-8 weeks (full feature)
+
+---
+
+## Phase 9: v3 Enhancement — Version Tracking, Editor Customization, Annotation, Traceability
+
+**Purpose**: Implement spec-v3 requirements for global version tracking, editor version control, diff/merge, annotation, and PRD sync
+
+### Phase 9a: Version Tracking — Filter/Sort/Pagination + Version Badges
+
+- [X] T091 Add filter state variables (filterStatus, filterPriority, filterVersion) to module page
+- [X] T092 Implement filteredAndSorted derived logic with multi-filter + sort support
+- [X] T093 Add filter bar UI (status/priority/version dropdowns + sort buttons) to module page template
+- [X] T094 Add pagination state (currentPage, PAGE_SIZE, totalPages, pagedEntries) and UI
+- [X] T095 Add version badge column to table view (PMVersionHistoryDropdown per row)
+- [X] T096 Add versionOptions derived list for version filter dropdown
+
+### Phase 9b: Editor Version Control — Auto-save vs Manual-save
+
+- [X] T097 Add auto-save state variables (autoSaveTimer, saveStatus, lastAutoSaveTime) to module page
+- [X] T098 Implement triggerAutoSave (30s debounce) and saveEntryContentOnly functions
+- [X] T099 Modify saveEntryDoc to open PMSaveVersionDialog instead of auto-creating version
+- [X] T100 Create PMSaveVersionDialog.svelte — save version confirmation modal
+- [X] T101 Add saveAsNewVersion function that creates EntryVersion
+- [X] T102 Add PMSaveVersionDialog import and template rendering
+- [X] T103 Add save status display in editor header (unsaved/auto-saving/auto-saved at HH:MM)
+
+### Phase 9c: Version Compare — Side-by-side Red/Green Diff
+
+- [X] T104 Create pmDiff.ts — Myers diff algorithm with HTML stripping
+- [X] T105 Rewrite PMVersionComparePanel.svelte with side-by-side layout
+- [X] T106 Implement green/red diff line rendering with line numbers and gutter markers
+- [X] T107 Implement synced scroll between left and right panels
+
+### Phase 9d: Version Merge — Line-level Selection
+
+- [X] T108 Rewrite PMVersionMergePanel.svelte with branch selection → conflict detection flow
+- [X] T109 Implement per-conflict resolution (source/target choice)
+- [X] T110 Add batch resolve (全部采用分支/全部采用主线) for multi-line selection
+
+### Phase 9e: Annotation Feature
+
+- [X] T111 Add EntryAnnotation type to types.ts
+- [X] T112 Create pmAnnotationExtension.ts — TipTap custom Mark (highlight yellow)
+- [X] T113 Create PMAnnotationPanel.svelte — annotation list side panel
+- [X] T114 Integrate AnnotationExtension into pmTiptapConfig.ts
+- [X] T115 Integrate annotation support into PMRichEditor.svelte (setAnnotation, PMAnnotationPanel, floating button)
+
+### Phase 9f: Traceability Enhancement
+
+- [X] T116 Rewrite PMTraceabilityGraph.svelte with entity-type-specific colors/labels
+- [X] T117 Add relation type filter to traceability graph
+- [X] T118 Add version badge on graph nodes (entries prop lookup)
+- [X] T119 Add versionSnapshot to relation creation in traceability graph
+- [X] T120 Add PMTraceabilityGraph component + "查看溯源图" button to module page trace panel
+
+### Phase 9g: PRD Sync & Verification
+
+- [X] T121 Add versionSnapshot field to Relation type in types.ts
+- [X] T122 Create spec-v3.md specification document
+- [X] T123 Create requirements-v3.md checklist
+- [X] T124 Build verification (vite build passes with no errors)
+- [X] T125 FR-001 through FR-020 verification — all 20 requirements confirmed implemented
+
+---
+
+## v3 Task Summary
+
+| Phase | Tasks | Description |
+|-------|-------|-------------|
+| Phase 9a | T091-T096 | Filter/sort/pagination + version badges |
+| Phase 9b | T097-T103 | Auto-save vs manual-save version control |
+| Phase 9c | T104-T107 | Side-by-side red/green diff |
+| Phase 9d | T108-T110 | Line-level merge with batch select |
+| Phase 9e | T111-T115 | Annotation feature (TipTap Mark + panel) |
+| Phase 9f | T116-T120 | Traceability enhancement (version badges, filters) |
+| Phase 9g | T121-T125 | PRD sync & build verification |
+
+**v3 Tasks**: 35
+**Status**: All completed

@@ -664,6 +664,19 @@ async def lifespan(app: FastAPI):
 
     app.state.redis = get_redis_client(async_mode=True)
 
+    # Ensure PM workspace tables exist (pm_project, pm_version, pm_entry).
+    # The model classes are already registered in Base.metadata via the
+    # import chain (routers.pm → models.pm → Base).  create_all is a
+    # no-op for tables that already exist, so this is safe to run every
+    # startup.
+    try:
+        from open_webui.internal.db import Base, engine
+
+        Base.metadata.create_all(bind=engine)
+        log.info('PM workspace tables verified/created')
+    except Exception:
+        log.warning('Could not auto-create PM tables', exc_info=True)
+
     if app.state.redis is not None:
         app.state.redis_task_command_listener = asyncio.create_task(redis_task_command_listener(app))
 

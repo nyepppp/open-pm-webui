@@ -18,7 +18,9 @@ export type ModuleType =
 	| 'meeting'
 	| 'acceptance'
 	| 'faq'
-	| 'product-architecture';
+	| 'product-architecture'
+	| 'prototype'
+	| 'schedule';
 
 export type ModuleCategory = 'planning' | 'design' | 'execution' | 'review';
 
@@ -62,9 +64,63 @@ export interface ModuleEntry {
 	versionId?: string;
 	status: ModuleStatus;
 	priority?: Priority;
+	currentVersionNumber?: string;
+	branchName?: string;
 	createdAt: number;
 	updatedAt: number;
 	version: number; // optimistic lock
+}
+
+// Entry-level version snapshot
+export interface EntryVersion {
+	id: string;
+	entryId: string;
+	projectId: string;
+	moduleType: ModuleType;
+	versionNumber: string;
+	content: string;
+	entry_metadata: Record<string, unknown>;
+	parentId: string | null;
+	branchName: string;
+	changeSummary: string;
+	createdBy: string;
+	createdAt: number;
+}
+
+// Version branch
+export interface VersionBranch {
+	id: string;
+	projectId: string;
+	entryId: string;
+	name: string;
+	sourceVersionId: string;
+	status: 'active' | 'merged' | 'archived';
+	mergedToVersionId: string | null;
+	createdAt: number;
+	updatedAt: number;
+}
+
+// Conflict item for version merge
+export interface ConflictItem {
+	path: string;
+	type: 'content' | 'metadata';
+	sourceValue: unknown;
+	targetValue: unknown;
+	resolution: 'source' | 'target' | 'manual' | null;
+	resolvedValue: unknown | null;
+}
+
+// Version merge record
+export interface VersionMerge {
+	id: string;
+	branchId: string;
+	sourceVersionId: string;
+	targetVersionId: string;
+	conflicts: ConflictItem[];
+	status: 'pending' | 'resolved' | 'auto_merged';
+	resolvedBy: string | null;
+	mergedAt: number | null;
+	createdAt: number;
 }
 
 // ============================================================================
@@ -234,7 +290,28 @@ export interface Relation {
 	confidence?: number; // 0-100
 	confirmed: 0 | 1;
 	createdBy?: 'ai' | 'user';
+	versionSnapshot?: {
+		entityAVersionNumber?: string;
+		entityBVersionNumber?: string;
+	};
 	createdAt: number;
+}
+
+// ============================================================================
+// Annotation
+// ============================================================================
+
+export interface EntryAnnotation {
+	id: string;
+	entryId: string;
+	entryVersionId: string;
+	textRange: { from: number; to: number };
+	selectedText: string;
+	content: string;
+	highlightColor: string;
+	createdBy: string;
+	createdAt: number;
+	updatedAt: number;
 }
 
 // ============================================================================
@@ -251,6 +328,75 @@ export interface AgentSuggestion {
 	confidence: number;
 	status: 'pending' | 'confirmed' | 'rejected';
 	createdAt: number;
+}
+
+// Agent Chat
+export interface AgentChatMessage {
+	id: string;
+	role: 'user' | 'assistant' | 'system';
+	content: string;
+	timestamp: number;
+	actions?: AgentAction[];
+	skillId?: string;
+}
+
+export type AgentSkillId =
+	| 'prd-generation'
+	| 'requirement-analysis'
+	| 'competitor-research'
+	| 'prototype-check'
+	| 'parameter-extract'
+	| 'testcase-generate'
+	| 'version-compare'
+	| 'relation-suggest'
+	| 'workflow-suggest'
+	| 'general';
+
+export interface AgentSkill {
+	id: AgentSkillId;
+	name: string;
+	description: string;
+	icon: string;
+}
+
+export interface AgentIntent {
+	skillId: AgentSkillId;
+	confidence: number;
+}
+
+export interface AgentAction {
+	id: string;
+	type: 'pm.entry.create' | 'pm.entry.update' | 'pm.relation.create' | 'pm.version.create' | 'pm.parameter.extract';
+	label: string;
+	description: string;
+	payload: Record<string, unknown>;
+	status: 'pending' | 'applied' | 'dismissed';
+}
+
+export interface AgentChatRequest {
+	message: string;
+	projectId: string;
+	moduleType?: ModuleType;
+	entryId?: string;
+	context?: {
+		projectName?: string;
+		entryTitle?: string;
+		entryContentSummary?: string;
+	};
+}
+
+export interface AgentChatResponse {
+	message: string;
+	intent?: AgentIntent;
+	actions?: AgentAction[];
+	skillId?: AgentSkillId;
+}
+
+export interface AgentStatus {
+	available: boolean;
+	provider: string;
+	model: string;
+	lastAnalysisAt?: number;
 }
 
 // ============================================================================
@@ -287,9 +433,11 @@ export interface EditorConfig {
 export interface FieldConfig {
 	name: string;
 	label: string;
-	type: 'text' | 'textarea' | 'select' | 'multiselect' | 'number' | 'date' | 'json' | 'richtext';
+	type: 'text' | 'textarea' | 'select' | 'multiselect' | 'number' | 'date' | 'json' | 'richtext' | 'combobox';
 	required?: boolean;
 	options?: string[];
+	dataSource?: 'modules' | 'features' | 'parameters';
+	dependsOn?: string;
 	placeholder?: string;
 	validation?: {
 		min?: number;

@@ -1,30 +1,14 @@
 import type { FieldConfig } from '$lib/apis/pm/types';
 
 // ============================================================================
-// Module Field Configurations
-// Each module defines its own form fields for the structured form editor
+// Module-specific field configurations for differentiated editors
+// Each module defines its own fields for form/mixed editor mode
 // ============================================================================
-
-export const prdFields: FieldConfig[] = [
-	{ name: 'title', label: '标题', type: 'text', required: true, placeholder: '输入PRD标题' },
-	{ name: 'version', label: '版本', type: 'text', required: true, placeholder: '如：v1.0' },
-	{ name: 'status', label: '状态', type: 'select', required: true, options: ['草稿', '评审中', '已批准', '已归档'] },
-	{ name: 'priority', label: '优先级', type: 'select', options: ['P0-紧急', 'P1-高', 'P2-中', 'P3-低'] }
-];
-
-export const requirementFields: FieldConfig[] = [
-	{ name: 'title', label: '需求标题', type: 'text', required: true, placeholder: '输入需求标题' },
-	{ name: 'source', label: '来源', type: 'select', options: ['手动录入', 'Excel导入', 'Agent提取'] },
-	{ name: 'category', label: '分类', type: 'text', placeholder: '如：功能需求、性能需求' },
-	{ name: 'tags', label: '标签', type: 'text', placeholder: '用逗号分隔多个标签' },
-	{ name: 'userRole', label: '用户角色', type: 'text', placeholder: '目标用户角色' },
-	{ name: 'expectedBenefit', label: '预期收益', type: 'textarea', placeholder: '描述该需求带来的价值' }
-];
 
 export const parameterFields: FieldConfig[] = [
 	{ name: 'key', label: '参数名', type: 'text', required: true, placeholder: '参数标识符' },
-	{ name: 'moduleId', label: '所属模块', type: 'text', placeholder: '关联的模块ID' },
-	{ name: 'featureId', label: '功能ID', type: 'text', placeholder: '关联的功能ID' },
+	{ name: 'moduleName', label: '所属模块', type: 'combobox', dataSource: 'modules', placeholder: '选择或输入模块名' },
+	{ name: 'featureName', label: '所属功能', type: 'combobox', dataSource: 'features', dependsOn: 'moduleName', placeholder: '选择或输入功能名' },
 	{ name: 'paramType', label: '参数类型', type: 'select', required: true, options: ['输入参数', '输出参数', '配置参数'] },
 	{ name: 'dataType', label: '数据类型', type: 'select', required: true, options: ['string', 'number', 'boolean', 'object', 'array'] },
 	{ name: 'required', label: '是否必填', type: 'select', options: ['是', '否'] },
@@ -32,96 +16,228 @@ export const parameterFields: FieldConfig[] = [
 	{ name: 'description', label: '说明', type: 'textarea', placeholder: '参数用途说明' }
 ];
 
+export const requirementFields: FieldConfig[] = [
+	{ name: 'source', label: '来源', type: 'select', options: ['manual', 'excel', 'agent', 'prd'] },
+	{ name: 'category', label: '分类', type: 'select', options: ['功能需求', '性能需求', '安全需求', '体验需求'] },
+	{ name: 'userRole', label: '用户角色', type: 'text', placeholder: '目标用户角色' },
+	{ name: 'expectedBenefit', label: '预期收益', type: 'textarea', placeholder: '预期业务价值' },
+	{ name: 'relatedModules', label: '关联模块', type: 'multiselect', options: [] },
+	{ name: 'tags', label: '标签', type: 'text', placeholder: '用逗号分隔多个标签' }
+];
+
 export const testcaseFields: FieldConfig[] = [
-	{ name: 'title', label: '用例标题', type: 'text', required: true, placeholder: '输入测试用例标题' },
 	{ name: 'scenario', label: '测试场景', type: 'textarea', required: true, placeholder: '描述测试场景' },
-	{ name: 'precondition', label: '前置条件', type: 'textarea', placeholder: '执行测试前需要满足的条件' },
-	{ name: 'steps', label: '测试步骤', type: 'textarea', required: true, placeholder: '详细描述测试步骤' },
-	{ name: 'expectedResult', label: '预期结果', type: 'textarea', required: true, placeholder: '预期的测试结果' },
-	{ name: 'caseType', label: '用例类型', type: 'select', required: true, options: ['功能测试', '边界测试', '异常测试', '性能测试'] },
-	{ name: 'requirementId', label: '关联需求', type: 'text', placeholder: '关联的需求ID' },
-	{ name: 'parameterId', label: '关联参数', type: 'text', placeholder: '关联的参数ID' }
+	{ name: 'precondition', label: '前置条件', type: 'textarea', placeholder: '执行测试前的准备条件' },
+	{ name: 'steps', label: '测试步骤', type: 'textarea', required: true, placeholder: '详细测试步骤' },
+	{ name: 'inputData', label: '输入数据', type: 'textarea', placeholder: '测试输入数据' },
+	{ name: 'expectedResult', label: '预期结果', type: 'textarea', required: true, placeholder: '期望的输出结果' },
+	{ name: 'caseType', label: '用例类型', type: 'select', required: true, options: ['functional', 'boundary', 'exception', 'performance'] },
+	{ name: 'requirementId', label: '关联需求ID', type: 'text', placeholder: '关联的需求条目ID' },
+	{ name: 'parameterId', label: '关联参数ID', type: 'text', placeholder: '关联的参数条目ID' }
 ];
 
 export const riskFields: FieldConfig[] = [
-	{ name: 'title', label: '风险标题', type: 'text', required: true, placeholder: '输入风险标题' },
-	{ name: 'probability', label: '风险等级', type: 'select', required: true, options: ['高', '中', '低'] },
-	{ name: 'impactScope', label: '影响范围', type: 'textarea', placeholder: '描述风险的影响范围' },
+	{ name: 'probability', label: '发生概率', type: 'select', required: true, options: ['high', 'medium', 'low'] },
+	{ name: 'impactScope', label: '影响范围', type: 'textarea', required: true, placeholder: '风险影响的范围描述' },
 	{ name: 'owner', label: '负责人', type: 'text', placeholder: '风险负责人' },
-	{ name: 'measures', label: '应对措施', type: 'textarea', placeholder: '描述风险应对措施' },
-	{ name: 'deadline', label: '截止日期', type: 'date' }
+	{ name: 'measures', label: '应对措施', type: 'textarea', placeholder: '风险缓解和应对措施' },
+	{ name: 'deadline', label: '解决期限', type: 'date', placeholder: 'YYYY-MM-DD' }
 ];
 
 export const competitorFields: FieldConfig[] = [
-	{ name: 'name', label: '竞品名称', type: 'text', required: true, placeholder: '输入竞品名称' },
-	{ name: 'url', label: '官网链接', type: 'text', placeholder: 'https://...' },
-	{ name: 'description', label: '描述', type: 'textarea', placeholder: '竞品描述' }
+	{ name: 'competitorUrl', label: '竞品URL', type: 'text', placeholder: 'https://...' },
+	{ name: 'dimension', label: '分析维度', type: 'text', placeholder: '如：功能、性能、价格' },
+	{ name: 'ourProduct', label: '我方产品', type: 'textarea', placeholder: '我方产品在该维度的表现' },
+	{ name: 'competitorProduct', label: '竞品表现', type: 'textarea', placeholder: '竞品在该维度的表现' },
+	{ name: 'analysis', label: '分析结论', type: 'textarea', placeholder: '对比分析结论' }
 ];
 
-export const roadmapFields: FieldConfig[] = [
-	{ name: 'title', label: '里程碑名称', type: 'text', required: true, placeholder: '输入里程碑名称' },
-	{ name: 'layout', label: '布局模式', type: 'select', options: ['层级树状', '径向', '自由布局'] }
-];
-
-export const meetingFields: FieldConfig[] = [
-	{ name: 'title', label: '会议主题', type: 'text', required: true, placeholder: '输入会议主题' },
-	{ name: 'participants', label: '参会人员', type: 'text', placeholder: '用逗号分隔多个参会人' },
-	{ name: 'meetingDate', label: '会议日期', type: 'date' },
-	{ name: 'conclusions', label: '会议结论', type: 'textarea', placeholder: '会议达成的结论' }
+export const scheduleFields: FieldConfig[] = [
+	{ name: 'assignee', label: '负责人', type: 'text', placeholder: '任务负责人' },
+	{ name: 'startDate', label: '开始日期', type: 'date' },
+	{ name: 'endDate', label: '结束日期', type: 'date' },
+	{ name: 'progress', label: '进度(%)', type: 'number', validation: { min: 0, max: 100 } },
+	{ name: 'isMilestone', label: '是否里程碑', type: 'select', options: ['是', '否'] }
 ];
 
 export const acceptanceFields: FieldConfig[] = [
-	{ name: 'title', label: '验收项', type: 'text', required: true, placeholder: '输入验收项名称' },
-	{ name: 'scope', label: '验收范围', type: 'textarea', placeholder: '描述验收范围' },
-	{ name: 'result', label: '验收结果', type: 'select', options: ['通过', '不通过', '部分通过'] }
+	{ name: 'requirementId', label: '关联需求', type: 'text', placeholder: '关联需求ID' },
+	{ name: 'scope', label: '验收范围', type: 'textarea', placeholder: '本次验收的范围描述' },
+	{ name: 'result', label: '验收结果', type: 'select', options: ['pass', 'fail', 'partial'] },
+	{ name: 'remainingIssues', label: '遗留问题', type: 'textarea', placeholder: '未解决的遗留问题' }
 ];
 
 export const faqFields: FieldConfig[] = [
-	{ name: 'question', label: '问题', type: 'textarea', required: true, placeholder: '输入常见问题' },
-	{ name: 'answer', label: '答案', type: 'textarea', required: true, placeholder: '输入问题答案' },
-	{ name: 'audience', label: '受众', type: 'text', placeholder: '目标受众' },
-	{ name: 'relatedFeatures', label: '相关功能', type: 'text', placeholder: '用逗号分隔多个功能' }
+	{ name: 'question', label: '问题', type: 'textarea', required: true, placeholder: '常见问题描述' },
+	{ name: 'answer', label: '答案', type: 'textarea', required: true, placeholder: '问题的详细解答' },
+	{ name: 'audience', label: '受众', type: 'text', placeholder: '目标受众，如：开发、测试、用户' },
+	{ name: 'relatedFeatures', label: '关联功能', type: 'text', placeholder: '关联的功能模块' }
+];
+
+export const meetingFields: FieldConfig[] = [
+	{ name: 'participants', label: '参会人员', type: 'text', placeholder: '用逗号分隔参会人员' },
+	{ name: 'meetingDate', label: '会议日期', type: 'date' },
+	{ name: 'conclusions', label: '会议结论', type: 'textarea', placeholder: '会议达成的结论' },
+	{ name: 'actionItems', label: '待办事项', type: 'textarea', placeholder: 'JSON格式的待办事项数组' }
+];
+
+export const prototypeFields: FieldConfig[] = [
+	{ name: 'protoType', label: '原型类型', type: 'select', options: ['web', 'mobile', 'desktop', 'other'] },
+	{ name: 'annotations', label: '标注说明', type: 'textarea', placeholder: '原型标注和说明' },
+	{ name: 'reviewStatus', label: '评审状态', type: 'select', options: ['pending', 'pass', 'fail'] }
+];
+
+export const roadmapFields: FieldConfig[] = [
+	{ name: 'nodeType', label: '节点类型', type: 'select', options: ['feature', 'milestone', 'epic', 'task'] },
+	{ name: 'nodeStatus', label: '节点状态', type: 'select', options: ['planned', 'in_progress', 'completed', 'delayed'] },
+	{ name: 'startDate', label: '开始日期', type: 'date' },
+	{ name: 'endDate', label: '结束日期', type: 'date' },
+	{ name: 'dependencies', label: '依赖项', type: 'text', placeholder: '逗号分隔的依赖节点ID' }
 ];
 
 export const productArchitectureFields: FieldConfig[] = [
-	{ name: 'title', label: '架构节点', type: 'text', required: true, placeholder: '输入节点名称' },
+	{ name: 'architectureType', label: '架构类型', type: 'select', options: ['frontend', 'backend', 'database', 'infrastructure', 'integration'] },
+	{ name: 'techStack', label: '技术栈', type: 'text', placeholder: '使用的技术栈' },
 	{ name: 'autoExtracted', label: '自动提取', type: 'select', options: ['是', '否'] }
 ];
 
 // ============================================================================
-// Editor Type Mapping
-// Maps each module to its editor type
+// Module field registry - maps module type to its field configuration
 // ============================================================================
 
-export type EditorType = 'rich' | 'form' | 'mixed' | 'mindmap';
+export const moduleFieldRegistry: Record<string, FieldConfig[]> = {
+	parameter: parameterFields,
+	requirement: requirementFields,
+	testcase: testcaseFields,
+	risk: riskFields,
+	competitor: competitorFields,
+	schedule: scheduleFields,
+	acceptance: acceptanceFields,
+	faq: faqFields,
+	meeting: meetingFields,
+	prototype: prototypeFields,
+	roadmap: roadmapFields,
+	'product-architecture': productArchitectureFields,
+};
 
-export const moduleEditorTypes: Record<string, EditorType> = {
-	prd: 'rich',
-	requirement: 'form',
-	parameter: 'form',
-	testcase: 'form',
-	risk: 'mixed',
-	competitor: 'rich',
-	roadmap: 'mindmap',
-	meeting: 'rich',
-	acceptance: 'form',
-	faq: 'rich',
-	'product-architecture': 'mindmap'
+// ============================================================================
+// Editor type mapping - determines which editor UI to render per module
+// ============================================================================
+
+export type ModuleEditorType = 'rich' | 'form' | 'mixed' | 'mindmap' | 'table';
+
+export interface ModuleEditorConfig {
+	editorType: ModuleEditorType;
+	fields: FieldConfig[];
+	label: string;
+	icon: string;
+	category: 'planning' | 'design' | 'execution' | 'review';
+}
+
+export const moduleEditorConfig: Record<string, ModuleEditorConfig> = {
+	prd: {
+		editorType: 'rich',
+		fields: [],
+		label: 'PRD 文档',
+		icon: 'document',
+		category: 'planning'
+	},
+	requirement: {
+		editorType: 'table',
+		fields: requirementFields,
+		label: '需求管理',
+		icon: 'list',
+		category: 'planning'
+	},
+	parameter: {
+		editorType: 'table',
+		fields: parameterFields,
+		label: '参数配置',
+		icon: 'settings',
+		category: 'design'
+	},
+	testcase: {
+		editorType: 'table',
+		fields: testcaseFields,
+		label: '测试用例',
+		icon: 'check',
+		category: 'execution'
+	},
+	risk: {
+		editorType: 'form',
+		fields: riskFields,
+		label: '风险分析',
+		icon: 'alert',
+		category: 'execution'
+	},
+	competitor: {
+		editorType: 'form',
+		fields: competitorFields,
+		label: '竞品分析',
+		icon: 'chart',
+		category: 'design'
+	},
+	roadmap: {
+		editorType: 'table',
+		fields: roadmapFields,
+		label: '产品路线图',
+		icon: 'map',
+		category: 'planning'
+	},
+	meeting: {
+		editorType: 'mixed',
+		fields: meetingFields,
+		label: '会议纪要',
+		icon: 'calendar',
+		category: 'execution'
+	},
+	acceptance: {
+		editorType: 'form',
+		fields: acceptanceFields,
+		label: '验收报告',
+		icon: 'shield',
+		category: 'review'
+	},
+	faq: {
+		editorType: 'form',
+		fields: faqFields,
+		label: 'FAQ',
+		icon: 'help',
+		category: 'review'
+	},
+	'product-architecture': {
+		editorType: 'mindmap',
+		fields: productArchitectureFields,
+		label: '产品架构',
+		icon: 'diagram',
+		category: 'design'
+	},
+	prototype: {
+		editorType: 'mixed',
+		fields: prototypeFields,
+		label: '原型/UI设计',
+		icon: 'image',
+		category: 'design'
+	},
+	schedule: {
+		editorType: 'table',
+		fields: scheduleFields,
+		label: '项目排期',
+		icon: 'clock',
+		category: 'execution'
+	}
 };
 
 export function getModuleFields(moduleType: string): FieldConfig[] {
-	switch (moduleType) {
-		case 'prd': return prdFields;
-		case 'requirement': return requirementFields;
-		case 'parameter': return parameterFields;
-		case 'testcase': return testcaseFields;
-		case 'risk': return riskFields;
-		case 'competitor': return competitorFields;
-		case 'roadmap': return roadmapFields;
-		case 'meeting': return meetingFields;
-		case 'acceptance': return acceptanceFields;
-		case 'faq': return faqFields;
-		case 'product-architecture': return productArchitectureFields;
-		default: return [];
-	}
+	return moduleFieldRegistry[moduleType] || [];
+}
+
+export function getModuleEditorConfig(moduleType: string): ModuleEditorConfig {
+	return moduleEditorConfig[moduleType] || {
+		editorType: 'rich',
+		fields: [],
+		label: moduleType,
+		icon: 'file',
+		category: 'planning'
+	};
 }

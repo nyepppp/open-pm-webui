@@ -123,12 +123,23 @@
 					<div class="flex gap-2">
 						{#each labelOptions as option}
 							<button
-								class="flex-1 px-4 py-2 text-sm rounded-lg border transition-colors {label === option.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}
+								class="flex-1 px-4 py-2 text-sm rounded-lg border transition-colors"
+								class:bg-blue-600={label === option.value}
+								class:text-white={label === option.value}
+								class:border-blue-600={label === option.value}
+								class:bg-white={label !== option.value}
+								class:dark:bg-gray-800={label !== option.value}
+								class:text-gray-700={label !== option.value}
+								class:dark:text-gray-300={label !== option.value}
+								class:border-gray-300={label !== option.value}
+								class:dark:border-gray-600={label !== option.value}
+								class:hover:bg-gray-50={label !== option.value}
+								class:dark:hover:bg-gray-700={label !== option.value}
 								onclick={() => label = option.value}
 							>
 								{option.label}
 							</button>
-							{/each}
+						{/each}
 						</div>
 					</div>
 

@@ -178,7 +178,7 @@
 			{nodeTypes}
 			{edges}
 			{setLayoutDirection}
-			on:nodeclick={(e) => {
+			onnodeclick={(e) => {
 				onNodeClick(e.detail);
 				selectedMessageId = e.detail.node.data.message.id;
 				fitView({ nodes: [{ id: selectedMessageId }] });

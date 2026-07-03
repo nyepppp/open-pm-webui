@@ -1,5 +1,5 @@
-import { getOne, create, update, remove } from './index';
-import type { Relation, ApiResponse } from './types';
+import { getOne, create, remove } from './index';
+import type { Relation } from './types';
 
 export function getRelationList(projectId: string, entityId?: string, relationType?: string) {
 	const params = new URLSearchParams();
