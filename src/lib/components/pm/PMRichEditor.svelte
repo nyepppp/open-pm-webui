@@ -36,6 +36,7 @@
 	let annotationPanelVisible = $state(false);
 	let hasSelection = $state(false);
 	let annotationBtnPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
+	let initError = $state('');
 
 	// Track last synced prop content with a non-reactive variable to avoid $effect loops
 	let lastPropContent = content;
@@ -43,11 +44,22 @@
 	let editorReady = $state(false);
 
 	onMount(() => {
-		if (!element) return;
+		if (!element) {
+			console.warn('PMRichEditor: element not available on mount');
+			initError = '编辑器初始化失败：DOM元素未找到';
+			isFallback = true;
+			return;
+		}
 		// Defer init to next frame so DOM is fully ready
 		requestAnimationFrame(() => {
-			if (!element) return;
+			if (!element) {
+				console.warn('PMRichEditor: element not available after rAF');
+				initError = '编辑器初始化失败：DOM元素未找到';
+				isFallback = true;
+				return;
+			}
 			try {
+				console.log('PMRichEditor: initializing TipTap editor');
 				editor = new Editor({
 					element,
 					extensions: getPMExtensions(placeholder),
@@ -89,10 +101,15 @@
 					},
 					onCreate: () => {
 						editorReady = true;
+						console.log('PMRichEditor: TipTap editor initialized successfully');
+					},
+					onDestroy: () => {
+						console.log('PMRichEditor: TipTap editor destroyed');
 					}
 				});
 			} catch (err) {
 				console.error('PMRichEditor: TipTap init failed', err);
+				initError = `编辑器初始化失败：${err instanceof Error ? err.message : '未知错误'}`;
 				isFallback = true;
 			}
 		});
@@ -106,7 +123,7 @@
 			if (editor && !editor.isDestroyed && !isFallback) {
 				const currentHTML = editor.getHTML();
 				if (newContent !== currentHTML) {
-					editor.commands.setContent(newContent || '<p></p>', false);
+					editor.commands.setContent(newContent || '<p></p>', { emitUpdate: false });
 				}
 			}
 			if (isFallback) {
@@ -218,6 +235,9 @@
 
 <div class="pm-rich-editor flex flex-col bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
 	{#if isFallback}
+		{#if initError}
+			<div class="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">{initError}</div>
+		{/if}
 		<textarea
 			class="w-full p-4 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 resize-none focus:outline-none min-h-[200px]"
 			value={fallbackText}
@@ -225,6 +245,12 @@
 			placeholder={placeholder}
 		></textarea>
 	{:else}
+		{#if !editorReady}
+			<div class="flex items-center justify-center p-8 text-sm text-gray-400">
+				<svg class="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+				编辑器加载中…
+			</div>
+		{/if}
 		{#if !readonly}
 			<!-- Toolbar -->
 			<div class="flex items-center gap-0.5 px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-t-lg flex-wrap">

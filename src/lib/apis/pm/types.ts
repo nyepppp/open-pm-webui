@@ -20,7 +20,8 @@ export type ModuleType =
 	| 'faq'
 	| 'product-architecture'
 	| 'prototype'
-	| 'schedule';
+	| 'schedule'
+	| 'requirement-boundary';
 
 export type ModuleCategory = 'planning' | 'design' | 'execution' | 'review';
 
