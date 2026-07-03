@@ -759,6 +759,20 @@ class CalendarEventTable:
         except Exception:
             return False
 
+    async def get_event_by_pm_entry_id(
+        self, pm_entry_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[CalendarEventModel]:
+        """Find calendar event synced from a PM entry by pm_entry_id in meta."""
+        from sqlalchemy import func
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(CalendarEvent)
+                .filter(func.json_extract(CalendarEvent.meta, '$.pm_entry_id') == pm_entry_id)
+                .filter(CalendarEvent.is_cancelled == False)
+            )
+            event = result.scalars().first()
+            return await self._to_event_model(event, db=db) if event else None
+
 
 class CalendarEventAttendeeTable:
     async def set_attendees(
