@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { moduleCategories, expandedCategories, toggleCategory, setActiveModule, sidebarCollapsed, type ModuleCategory } from '$lib/stores/pm/moduleStore';
-	import type { ModuleType } from '$lib/apis/pm/types';
+	import { moduleCategories, expandedCategories, toggleCategory, setActiveModule, sidebarCollapsed } from '$lib/stores/pm/moduleStore';
+	import type { ModuleType, ModuleCategory } from '$lib/apis/pm/types';
 
 	// Props
 	interface Props {
@@ -48,9 +48,15 @@
 		}
 	});
 
-	function handleModuleClick(moduleType: ModuleType, path: string) {
+	function handleModuleClick(moduleType: ModuleType, _path: string) {
 		setActiveModule(moduleType);
-		goto(path);
+		// The module.path from moduleStore is static (/pm/risk) and missing the projectId.
+		// Construct the correct path dynamically using the projectId prop.
+		if (projectId) {
+			goto(`/pm/${projectId}/${moduleType}`);
+		} else {
+			goto(`/pm/${moduleType}`);
+		}
 	}
 
 	function handleToggleCollapse() {
