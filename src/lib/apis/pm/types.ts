@@ -83,6 +83,7 @@ export interface EntryVersion {
 	parentId: string | null;
 	branchName: string;
 	changeSummary: string;
+	projectVersionId?: string;
 	createdBy: string;
 	createdAt: number;
 }

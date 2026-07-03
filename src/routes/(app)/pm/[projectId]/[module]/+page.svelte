@@ -73,8 +73,8 @@
 		roadmap: { name: '产品路线图', editorType: 'table', tableColumns: [
 			{ key: 'title', label: '节点名称' }, { key: 'description', label: '描述', width: 'w-32' },
 			{ key: 'nodeType', label: '类型', width: 'w-20' },
-			{ key: 'nodeStatus', label: '状态', width: 'w-20' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
+			{ key: 'nodeStatus', label: '状态', width: 'w-20' },
 			{ key: 'startDate', label: '开始', width: 'w-24' },
 			{ key: 'endDate', label: '结束', width: 'w-24' }, { key: 'dependencies', label: '依赖', width: 'w-24' },
 			{ key: 'updatedAt', label: '更新', width: 'w-24' }
