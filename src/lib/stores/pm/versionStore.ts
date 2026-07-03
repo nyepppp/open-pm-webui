@@ -87,3 +87,11 @@ export function setVersionLoading(loading: boolean) {
 export function setVersionError(error: string | null) {
 	versionError.set(error);
 }
+
+export function resetVersionStore() {
+	versions.set([]);
+	currentVersion.set(null);
+	versionLoading.set(false);
+	versionError.set(null);
+	versionSearchQuery.set('');
+}

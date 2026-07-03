@@ -39,7 +39,9 @@
 		meeting: '会议',
 		acceptance: '验收',
 		faq: 'FAQ',
-		'product-architecture': '产品架构'
+		'product-architecture': '产品架构',
+		prototype: '原型',
+		schedule: '排期'
 	};
 
 	// Filtered items based on search

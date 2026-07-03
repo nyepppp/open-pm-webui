@@ -31,14 +31,15 @@
 		loading = true;
 		error = '';
 		try {
-			const response = await compareVersions(projectId, versionA.id, versionB.id);
-			if (response.success && response.data) {
-				diff = response.data.diff;
+			const data = await compareVersions(projectId, versionA.id, versionB.id);
+			if (data && data.diff) {
+				diff = data.diff;
 			} else {
-				error = response.error || '加载对比失败';
+				diff = { added: [], modified: [], deleted: [] };
 			}
 		} catch (e) {
 			error = '加载对比时出错';
+			console.error(e);
 		} finally {
 			loading = false;
 		}

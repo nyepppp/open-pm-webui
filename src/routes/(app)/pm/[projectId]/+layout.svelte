@@ -5,7 +5,7 @@
 	import { toast } from 'svelte-sonner';
 	import { getProject, getVersions, createVersion } from '$lib/apis/pm/index';
 	import { setCurrentProject, currentProject } from '$lib/stores/pm/projectStore';
-	import { setCurrentVersion, currentVersion, versions } from '$lib/stores/pm/versionStore';
+	import { setCurrentVersion, currentVersion, versions, resetVersionStore } from '$lib/stores/pm/versionStore';
 	import { showSidebar } from '$lib/stores';
 	import type { Project, Version } from '$lib/apis/pm/types';
 
@@ -30,12 +30,14 @@
 
 	async function loadProject() {
 		if (!projectId) return;
+		resetVersionStore();
 		apiStatus = 'loading';
 		try {
 			const token = localStorage.token || '';
 			project = await getProject(token, projectId);
 			setCurrentProject(project);
 			const versionList = await getVersions(token, projectId);
+			versions.set(versionList || []);
 			if (versionList?.length > 0) {
 				setCurrentVersion(versionList[0]);
 			}

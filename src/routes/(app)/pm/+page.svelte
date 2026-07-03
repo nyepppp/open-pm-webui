@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
-	import { getProjects, createProject, deleteProject } from '$lib/apis/pm/index';
+	import { getProjects, createProject, deleteProject, updateProject } from '$lib/apis/pm/index';
 	import type { Project } from '$lib/apis/pm/types';
 
 	let projects = $state<Project[]>([]);
@@ -13,6 +13,14 @@
 	let newProjectName = $state('');
 	let newProjectDesc = $state('');
 	let newProjectType = $state<'prd' | 'competitor' | 'general'>('general');
+
+	let isCreating = $state(false);
+
+	// Inline edit state
+	let editingProjectId = $state<string | null>(null);
+	let editName = $state('');
+	let editDesc = $state('');
+	let isSaving = $state(false);
 
 	async function loadProjects() {
 		isLoading = true;
@@ -29,7 +37,8 @@
 	onMount(() => { loadProjects(); });
 
 	async function handleCreate() {
-		if (!newProjectName.trim()) return;
+		if (!newProjectName.trim() || isCreating) return;
+		isCreating = true;
 		try {
 			const token = localStorage.token || '';
 			await createProject(token, { name: newProjectName, description: newProjectDesc || undefined });
@@ -39,7 +48,42 @@
 			await loadProjects();
 			toast.success('项目创建成功');
 		} catch (e: any) {
-			toast.error(e.message || '创建失败');
+			const msg = e?.message || '';
+			if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
+				toast.error('无法连接服务器，请检查后端是否已启动');
+			} else {
+				toast.error(msg || '创建失败');
+			}
+		} finally {
+			isCreating = false;
+		}
+	}
+
+	function startEdit(project: Project) {
+		editingProjectId = project.id;
+		editName = project.name;
+		editDesc = project.description || '';
+	}
+
+	function cancelEdit() {
+		editingProjectId = null;
+		editName = '';
+		editDesc = '';
+	}
+
+	async function saveEdit() {
+		if (!editingProjectId || isSaving) return;
+		isSaving = true;
+		try {
+			const token = localStorage.token || '';
+			await updateProject(token, editingProjectId, { name: editName, description: editDesc });
+			editingProjectId = null;
+			await loadProjects();
+			toast.success('项目已更新');
+		} catch (e: any) {
+			toast.error(e.message || '更新失败');
+		} finally {
+			isSaving = false;
 		}
 	}
 
@@ -76,6 +120,14 @@
 		competitor: '竞品分析',
 		general: '通用项目'
 	};
+
+	import { normalizeTs, formatDate, formatDateTime } from '$lib/utils/pmTimeUtils';
+
+	function formatTime(ts: unknown): string {
+		const ms = normalizeTs(ts);
+		if (ms == null) return '';
+		try { return dayjs(ms).fromNow(); } catch { return ''; }
+	}
 </script>
 
 <svelte:head>
@@ -161,7 +213,7 @@
 					</div>
 					<div class="flex justify-end gap-2">
 						<button class="px-3 py-1.5 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition" onclick={() => { showNewForm = false; newProjectName = ''; newProjectDesc = ''; }}>取消</button>
-						<button class="px-3 py-1.5 text-sm bg-black text-white dark:bg-white dark:text-black rounded-lg transition disabled:opacity-50" onclick={handleCreate} disabled={!newProjectName.trim()}>创建</button>
+						<button class="px-3 py-1.5 text-sm bg-black text-white dark:bg-white dark:text-black rounded-lg transition disabled:opacity-50" onclick={handleCreate} disabled={!newProjectName.trim() || isCreating}>{isCreating ? '创建中...' : '创建'}</button>
 					</div>
 				</div>
 			</div>
@@ -185,27 +237,49 @@
 		{:else}
 			<div class="px-2.5 py-1 gap-1.5 flex flex-col">
 				{#each filteredProjects as project (project.id)}
-					<a href="/pm/{project.id}" class="flex cursor-pointer w-full px-3.5 py-1.5 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition group">
-						<div class="w-full flex flex-col justify-between">
-							<div class="flex-1">
-								<div class="flex items-center gap-2 self-center justify-between">
-									<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{project.name}</div>
-									<div class="flex shrink-0 items-center text-xs gap-2">
-										<span class="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">{typeLabels[project.type] || project.type}</span>
-										<span class="text-gray-500 dark:text-gray-400">{dayjs(project.updatedAt).fromNow()}</span>
-										<button class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition opacity-0 group-hover:opacity-100" onclick={(e) => { e.stopPropagation(); handleDelete(project); }} title="删除">
-											<svg class="size-3.5 text-gray-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-												<path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-											</svg>
-										</button>
-									</div>
-								</div>
-								{#if project.description}
-									<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{project.description}</div>
-								{/if}
+					{#if editingProjectId === project.id}
+						<!-- Inline edit mode -->
+						<div class="w-full px-3.5 py-2.5 border border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10 rounded-2xl">
+							<input type="text" class="w-full text-sm px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 mb-2" placeholder="项目名称" bind:value={editName} />
+							<textarea class="w-full text-sm px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 resize-none mb-2" placeholder="项目描述" rows="2" bind:value={editDesc}></textarea>
+							<div class="flex justify-end gap-2">
+								<button class="px-3 py-1.5 text-xs rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition" onclick={cancelEdit}>取消</button>
+								<button class="px-3 py-1.5 text-xs bg-black text-white dark:bg-white dark:text-black rounded-lg transition disabled:opacity-50" onclick={saveEdit} disabled={!editName.trim() || isSaving}>{isSaving ? '保存中...' : '保存'}</button>
 							</div>
 						</div>
-					</a>
+					{:else}
+						<a href="/pm/{project.id}" class="flex cursor-pointer w-full px-3.5 py-1.5 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition group">
+							<div class="w-full flex flex-col justify-between">
+								<div class="flex-1">
+									<div class="flex items-center gap-2 self-center justify-between">
+										<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{project.name}</div>
+										<div class="flex shrink-0 items-center text-xs gap-2">
+											<span class="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">{typeLabels[project.type] || project.type}</span>
+											{#if normalizeTs(project.createdAt) != null}
+												<span class="text-gray-400 dark:text-gray-500" title={formatDateTime(project.createdAt)}>创建于 {formatDate(project.createdAt)}</span>
+											{/if}
+											{#if normalizeTs(project.updatedAt) != null}
+												<span class="text-gray-500 dark:text-gray-400">{formatTime(project.updatedAt)}</span>
+											{/if}
+											<button class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition opacity-0 group-hover:opacity-100" title="编辑" onclick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(project); }}>
+												<svg class="size-3.5 text-gray-400 hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+													<path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+												</svg>
+											</button>
+											<button class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition opacity-0 group-hover:opacity-100" title="删除" onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(project); }}>
+												<svg class="size-3.5 text-gray-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+													<path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+												</svg>
+											</button>
+										</div>
+									</div>
+									{#if project.description}
+										<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{project.description}</div>
+									{/if}
+								</div>
+							</div>
+						</a>
+					{/if}
 				{/each}
 			</div>
 		{/if}

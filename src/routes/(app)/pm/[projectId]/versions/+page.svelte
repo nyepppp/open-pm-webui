@@ -55,7 +55,14 @@
 		} catch (e: any) { toast.error(e.message || '创建失败'); }
 	}
 
-	let sortedVersions = $derived([...$versions].sort((a, b) => b.createdAt - a.createdAt));
+	let sortedVersions = $derived([...$versions].sort((a, b) => (normalizeTs(b.createdAt) ?? 0) - (normalizeTs(a.createdAt) ?? 0)));
+
+	import { normalizeTs, formatDateTime } from '$lib/utils/pmTimeUtils';
+
+	function vNum(v: any): string { return v.versionNumber || v.version_number || 'v?'; }
+	function vId(v: any): string { return v.id || ''; }
+	function vLabel(v: any): string { return v.label || ''; }
+	function vDesc(v: any): string { return v.description || ''; }
 </script>
 
 <div class="w-full min-h-full h-full px-3 md:px-[18px]">
@@ -109,22 +116,22 @@
 			</div>
 		{:else}
 			<div class="px-2.5 py-1 gap-1.5 flex flex-col">
-				{#each sortedVersions as v (v.id)}
+				{#each sortedVersions as v (vId(v))}
 					<div class="flex cursor-pointer w-full px-3.5 py-2 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition group">
 						<div class="w-full flex items-center justify-between">
 							<div class="flex items-center gap-3">
-								<span class="text-sm font-semibold text-gray-900 dark:text-gray-100">{v.versionNumber}</span>
-								{#if v.label}
-									<span class="px-1.5 py-0.5 text-xs rounded {labelLabels[v.label]?.c || ''}">{labelLabels[v.label]?.l || v.label}</span>
+								<span class="text-sm font-semibold text-gray-900 dark:text-gray-100">{vNum(v)}</span>
+								{#if vLabel(v)}
+									<span class="px-1.5 py-0.5 text-xs rounded {labelLabels[vLabel(v)]?.c || ''}">{labelLabels[vLabel(v)]?.l || vLabel(v)}</span>
 								{/if}
-								{#if v.description}
-									<span class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 max-w-xs">{v.description}</span>
+								{#if vDesc(v)}
+									<span class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 max-w-xs">{vDesc(v)}</span>
 								{/if}
 							</div>
 							<div class="flex items-center gap-2 text-xs">
-								<span class="text-gray-500 dark:text-gray-400">{dayjs(v.createdAt / 1_000_000).format('YYYY-MM-DD HH:mm')}</span>
-								<button class="px-2 py-1 text-xs rounded-lg {($currentVersion?.id === v.id) ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'} transition" onclick={() => { setCurrentVersion(v); toast.success(`已切换到 ${v.versionNumber}`); }}>
-									{($currentVersion?.id === v.id) ? '当前版本' : '切换'}
+								<span class="text-gray-500 dark:text-gray-400">{formatDateTime(v.createdAt) || '-'}</span>
+								<button class="px-2 py-1 text-xs rounded-lg {($currentVersion?.id === vId(v)) ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'} transition" onclick={() => { setCurrentVersion(v); toast.success(`已切换到 ${vNum(v)}`); }}>
+									{($currentVersion?.id === vId(v)) ? '当前版本' : '切换'}
 								</button>
 								<!-- Placeholder for compare/rollback -->
 								<button class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition opacity-0 group-hover:opacity-100" title="版本对比（开发中）" onclick={() => { toast.info('版本对比功能开发中'); }}>

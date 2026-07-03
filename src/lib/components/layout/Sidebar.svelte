@@ -79,59 +79,7 @@
 	const BREAKPOINT = 768;
 	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'pm'];
 
-	let pmNavOpen = false;
-
-	const pmModuleGroups = [
-		{
-			id: 'core',
-			label: '⚙️ 管理',
-			modules: [
-				{ id: 'workflow', label: '工作流' },
-				{ id: 'versions', label: '版本管理' },
-				{ id: 'traceability', label: '溯源关系' }
-			]
-		},
-		{
-			id: 'plan',
-			label: '🗺️ 规划',
-			modules: [
-				{ id: 'prd', label: 'PRD 文档' },
-				{ id: 'requirement', label: '需求管理' },
-				{ id: 'roadmap', label: '产品路线图' }
-			]
-		},
-		{
-			id: 'design',
-			label: '🎨 设计',
-			modules: [
-				{ id: 'parameter', label: '参数配置' },
-				{ id: 'product-architecture', label: '产品架构' },
-				{ id: 'competitor', label: '竞品分析' }
-			]
-		},
-		{
-			id: 'execute',
-			label: '⚡ 执行',
-			modules: [
-				{ id: 'testcase', label: '测试用例' },
-				{ id: 'risk', label: '风险分析' },
-				{ id: 'meeting', label: '会议纪要' }
-			]
-		},
-		{
-			id: 'review',
-			label: '📊 复盘',
-			modules: [
-				{ id: 'acceptance', label: '验收报告' },
-				{ id: 'faq', label: 'FAQ' }
-			]
-		}
-	];
-
 	$: isPmRoute = $page.url.pathname.startsWith('/pm');
-	$: pmProjectId = isPmRoute ? $page.url.pathname.split('/')[2] || '' : '';
-	$: activePmModule = isPmRoute ? ($page.url.pathname.split('/')[3] || '') : '';
-	$: if (isPmRoute && !pmNavOpen) { pmNavOpen = true; }
 
 	let scrollTop = 0;
 
@@ -1185,13 +1133,13 @@
 										class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200"
 										data-id={itemId}
 									>
-										<button
+										<a
 											id="sidebar-{itemId}-button"
 											class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {isPmRoute ? 'bg-gray-100 dark:bg-gray-900' : ''}"
-											on:click={() => { pmNavOpen = !pmNavOpen; }}
+											href={meta.href}
+											on:click={itemClickHandler}
 											draggable="false"
 											aria-label={$i18n.t(meta.label)}
-											aria-expanded={pmNavOpen}
 										>
 											<div class="self-center">
 												<svg
@@ -1208,32 +1156,8 @@
 											<div class="flex flex-1 self-center translate-y-[0.5px]">
 												<div class=" self-center text-sm font-primary">{$i18n.t(meta.label)}</div>
 											</div>
-											<svg class="w-3.5 h-3.5 text-gray-400 transition-transform duration-200 {pmNavOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-											</svg>
-										</button>
+										</a>
 									</div>
-									{#if pmNavOpen}
-										{#each pmModuleGroups as group (group.id)}
-											<div class="px-3 mt-1">
-												<div class="px-2 py-1 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-													{group.label}
-												</div>
-												{#each group.modules as mod (mod.id)}
-													<a
-														class="flex items-center space-x-3 rounded-xl px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {activePmModule === mod.id ? 'bg-gray-100 dark:bg-gray-900 text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}"
-														href={pmProjectId ? `/pm/${pmProjectId}/${mod.id}` : '/pm'}
-														on:click={itemClickHandler}
-														draggable="false"
-														aria-label={mod.label}
-														aria-current={activePmModule === mod.id ? 'page' : undefined}
-													>
-														<div class=" self-center text-sm font-primary">{mod.label}</div>
-													</a>
-												{/each}
-											</div>
-										{/each}
-									{/if}
 								{:else}
 									<div
 										class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200"
