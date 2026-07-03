@@ -103,6 +103,14 @@
 			{ key: 'progress', label: '进度', width: 'w-16' }, { key: 'isMilestone', label: '里程碑', width: 'w-16' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
+		]},
+		'requirement-boundary': { name: '需求边界', editorType: 'form', formFields: [
+			{ key: 'scenario', label: '场景', type: 'textarea' },
+			{ key: 'function', label: '功能', type: 'textarea' },
+			{ key: 'usage', label: '使用方式', type: 'textarea' },
+			{ key: 'expectedEffect', label: '预期效果', type: 'textarea' },
+			{ key: 'relatedRequirements', label: '关联需求', type: 'select' },
+			{ key: 'relatedParameters', label: '关联参数', type: 'select' }
 		]}
 	};
 

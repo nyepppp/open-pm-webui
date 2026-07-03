@@ -41,7 +41,8 @@
 		faq: 'FAQ',
 		'product-architecture': '产品架构',
 		prototype: '原型',
-		schedule: '排期'
+		schedule: '排期',
+		'requirement-boundary': '需求边界'
 	};
 
 	// Filtered items based on search

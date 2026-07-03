@@ -13,7 +13,8 @@
 		prd: 'PRD 文档', requirement: '需求管理', roadmap: '产品路线图',
 		parameter: '参数配置', 'product-architecture': '产品架构', competitor: '竞品分析',
 		testcase: '测试用例', risk: '风险分析', meeting: '会议纪要',
-		acceptance: '验收报告', faq: 'FAQ'
+		acceptance: '验收报告', faq: 'FAQ',
+		'requirement-boundary': '需求边界'
 	};
 
 	interface Props {
