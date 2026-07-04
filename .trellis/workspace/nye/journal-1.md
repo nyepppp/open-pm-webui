@@ -272,3 +272,36 @@ Verified all PRD R1/R2/R3 endpoints exist (64 routes total). trellis-check found
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: pm-tool-registration: fix endpoint mismatches
+
+**Date**: 2026-07-04
+**Task**: pm-tool-registration: fix endpoint mismatches
+**Branch**: `main`
+
+### Summary
+
+Fixed 6 API endpoint mismatches across 3 PM tool files: pm_ai_tool (suggest_relations, generate_prd), pm_version_tool (get_version, switch_version, compare_versions), pm_workflow_tool (execute_workflow payload). All 7 tool Python classes were already well-structured with Valves, docstrings, and __event_call__ confirmations.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed6a173e4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
