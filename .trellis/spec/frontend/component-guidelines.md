@@ -306,3 +306,91 @@ await updateEntry(token, editingEntryId, {
 ```
 
 **Why**: If auto-save omits `versionId`, the next auto-save cycle will overwrite the entry data without the version association, effectively un-associating the entry from its version silently.
+
+---
+
+## SPEC Module Pattern
+
+### Convention: Module registration checklist
+
+When adding a new PM module, update ALL of these locations:
+
+1. `ModuleType` in `types.ts` — add the new module key
+2. `moduleConfig` in `+page.svelte` — add config with `name`, `editorType`, and optional `tableColumns`/`formFields`
+3. `moduleGroups` in `[projectId]/+page.svelte` — add to the appropriate category group (plan/design/execute/review/boundary)
+4. `moduleLabels` in `[projectId]/+layout.svelte` — add display label
+5. `svgIcons` in `[projectId]/+page.svelte` — add Heroicon path
+6. `moduleCounts` in dashboard — add default count key
+
+**Why**: Missing any of these causes either a TypeScript error, a missing navigation entry, or a broken breadcrumb. The checklist prevents partial registrations.
+
+### Convention: SPEC metadata in `entry.data`
+
+SPEC module stores structured metadata in the entry's `data` field:
+
+```typescript
+interface SpecMetadata {
+    specCategory: 'functional' | 'prototype';
+    role?: 'template';  // marks entry as a custom template
+    relatedRequirements?: string[];  // entry IDs
+    relatedParameters?: string[];    // entry IDs
+}
+```
+
+**Why**: Using `data` (not `metadata`) is consistent with how other modules store structured fields (parameter, testcase, etc.). The `role: 'template'` marker allows custom templates to coexist with regular SPEC entries in the same `moduleType: 'spec'` bucket.
+
+### Pattern: Template selection before creation
+
+For modules with template support, use a dialog-first create flow:
+
+```typescript
+function handleSpecCreate() {
+    showSpecTemplateDialog = true;
+}
+
+function handleSpecTemplateSelect(template: SpecTemplate | null) {
+    if (template) {
+        newContent = template.content;
+        specCategory = template.category;
+    }
+    showSpecTemplateDialog = false;
+    showNewForm = true;
+}
+```
+
+**Why**: Setting `newContent` before `showNewForm = true` ensures the editor has content when it renders. The template dialog intercepts the create flow without modifying the existing `handleCreate` function.
+
+### Pattern: Glossary panel with editor insert
+
+Side panels that insert content into a TipTap editor use `editor.chain().focus().insertContent()`:
+
+```typescript
+function insertTerm(term: string, termEn: string, definition: string) {
+    if (!editor) return;
+    const html = `<p><strong>${term} (${termEn})</strong>: ${definition}</p>`;
+    editor.chain().focus().insertContent(html).run();
+}
+```
+
+**Why**: `focus()` ensures the editor cursor is active before insertion. The HTML format matches the TipTap content model. The null guard prevents errors when the editor instance is unavailable.
+
+### Gotcha: `@const` tag placement in Svelte
+
+`{@const}` declarations must be immediate children of `{#if}`, `{#each}`, or component blocks — NOT inside arbitrary `<div>` elements within those blocks:
+
+```svelte
+<!-- WRONG: @const inside a div child of {:else if} -->
+{:else if moduleType === 'spec'}
+    <div>
+        {@const specCat = getEntryData(entry, 'specCategory')}  <!-- ERROR -->
+        <span>{specCat}</span>
+    </div>
+
+<!-- CORRECT: Use inline expressions or move @const to block level -->
+{:else if moduleType === 'spec'}
+    <div>
+        <span>{(getEntryData(entry, 'specCategory') || 'functional') === 'prototype' ? '前端原型' : '功能'}</span>
+    </div>
+```
+
+**Why**: Svelte 5 restricts `{@const}` placement to specific structural blocks. Inside card list rendering within `{:else if}` branches, use inline expressions instead to avoid the `const_tag_invalid_placement` compiler error.

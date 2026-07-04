@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Svelte component patterns and conventions for new PMSpecTemplateDialog and PMSpecGlossaryPanel components"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Svelte store and $state patterns for spec category, template selection, and glossary panel state"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TypeScript patterns for SpecMetadata interface and SpecTemplate type definitions"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality gates and verification checklist before marking each implement step complete"}
