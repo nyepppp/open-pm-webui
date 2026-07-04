@@ -133,19 +133,52 @@ entry = await PMEntries.insert_new_entry(user.id, entry_form, db=db)
 
 ## Pattern: LLM Response Parsing
 
-LLM responses are unpredictable. Always use a regex-based JSON extraction pattern:
+LLM responses are unpredictable — they often wrap JSON in markdown code blocks or add explanatory text. **Never use `json.loads(llm_response)` directly.** Always use the `_extract_json` helper:
 
 ```python
-llm_response = await _call_llm(request, user, system_prompt, user_message)
-items = []
-if llm_response:
+def _extract_json(llm_response: str, expect_list: bool = True):
+    """Extract JSON from LLM response that may include markdown fences or explanatory text."""
+    import re
+    if not llm_response:
+        return [] if expect_list else {}
+
+    # Fast path: direct parse
     try:
-        import re
-        json_match = re.search(r'\[.*\]', llm_response, re.DOTALL)  # For arrays
+        result = json.loads(llm_response)
+        if expect_list and not isinstance(result, list):
+            result = [result] if result else []
+        return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Regex extraction: pull JSON array or object from the response
+    try:
+        pattern = r'\[.*\]' if expect_list else r'\{.*\}'
+        json_match = re.search(pattern, llm_response, re.DOTALL)
         if json_match:
-            items = json.loads(json_match.group(0))
-    except Exception:
-        items = []
+            result = json.loads(json_match.group())
+            if expect_list and not isinstance(result, list):
+                result = [result] if result else []
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return [] if expect_list else {}
+```
+
+Usage in module-level AI endpoints:
+
+```python
+# For endpoints returning arrays (extract-parameters, generate-testcases)
+parameters = _extract_json(llm_response, expect_list=True)
+
+# For endpoints returning objects (analyze, check, workflow/next)
+analysis = _extract_json(llm_response, expect_list=False)
+
+# For generate endpoint (may return string or JSON)
+generated_content = _extract_json(llm_response, expect_list=False)
+if not generated_content:
+    generated_content = llm_response  # Fallback to raw text
 ```
 
 ---
@@ -195,3 +228,69 @@ The `FlowExecuteRequest.confirmed` field defaults to `False`. The endpoint MUST 
 ### Not creating entities for traceability
 
 Each entry created by a flow MUST have a corresponding `PMEntity` and `PMRelation` (derives) back to its source. Without these, the traceability graph breaks and the `validate_traceability` endpoint will report errors.
+
+### Using `metadata=` instead of `entity_metadata=` in PMEntityForm
+
+`PMEntityForm` uses `entity_metadata=` (not `metadata=`) because `metadata` is reserved by SQLAlchemy. When constructing `PMEntityForm` from a dict, use:
+
+```python
+# WRONG — will cause Pydantic ValidationError at runtime
+entity_form = PMEntityForm(..., metadata=form_data.get('metadata'))
+
+# CORRECT
+entity_form = PMEntityForm(..., entity_metadata=form_data.get('metadata'))
+```
+
+### Calling `skill.execute()` on BaseSkill
+
+`BaseSkill` has NO `execute()` method. The skill class hierarchy uses:
+- `skill.system_prompt` — for LLM system prompt
+- `skill.build_user_message(...)` — for constructing user message with context
+- `skill.parse_response(llm_response)` — for parsing LLM output into structured result
+- `skill.fallback_response()` — for when LLM is unavailable
+
+To execute a skill, call `_call_llm` then use skill methods:
+
+```python
+# WRONG — AttributeError at runtime
+result = await skill.execute(step.inputs, user, db)
+
+# CORRECT
+user_msg = skill.build_user_message(user_message=msg, project_id=pid, ...)
+llm_response = await _call_llm(request, user, skill.system_prompt, user_msg)
+if llm_response:
+    result = skill.parse_response(llm_response)
+else:
+    result = {'message': skill.fallback_response(), 'actions': None}
+```
+
+### Using `eval()` for condition evaluation
+
+`eval()` is a security vulnerability even with `__builtins__` removed. Use `ast.literal_eval()` for safe evaluation of boolean/numeric literals:
+
+```python
+# WRONG — security vulnerability
+condition_met = eval(step.condition, {"__builtins__": {}}, {})
+
+# CORRECT — safe evaluation of literals only
+import ast
+condition_met = ast.literal_eval(step.condition)
+if not isinstance(condition_met, bool):
+    condition_met = bool(condition_met)
+```
+
+### DELETE with request body
+
+HTTP DELETE with a request body is non-standard and many clients/proxies will strip the body. Use POST for agent tool endpoints that need a body:
+
+```python
+# WRONG — body may be stripped by proxies
+@router.delete('/agent/tools/delete_entry')
+
+# CORRECT — reliable body delivery
+@router.post('/agent/tools/delete_entry')
+```
+
+### Parameter name shadowing builtins
+
+Avoid `format` as a parameter name (shadows Python builtin). Use `export_format` or `output_format` instead.

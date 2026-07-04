@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
-from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.pm import (
     PMEntries,
@@ -611,7 +610,6 @@ class PMImportRequest(BaseModel):
 
 import csv
 import io
-import json
 
 
 async def _import_entries(
@@ -754,7 +752,7 @@ async def import_entries(
 @router.get('/entries/{entry_id}/export')
 async def export_entry(
     entry_id: str,
-    format: str = 'json',
+    export_format: str = 'json',
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -771,7 +769,7 @@ async def export_entry(
     from open_webui.models.pm import PMEntryVersions
     latest_version = await PMEntryVersions.get_latest_version_by_entry_id(entry_id, db=db)
 
-    if format == 'json':
+    if export_format == 'json':
         entry_dict = PMEntryModel.model_validate(entry).model_dump()
         version_dict = None
         if latest_version:
@@ -780,14 +778,14 @@ async def export_entry(
             'entry': entry_dict,
             'version': version_dict,
         }
-    elif format == 'markdown':
+    elif export_format == 'markdown':
         content = entry.content or ''
         if entry.data and isinstance(entry.data, dict):
             # Try to format data as markdown if available
             data_md = json.dumps(entry.data, ensure_ascii=False, indent=2)
             content = f'{content}\n\n## Data\n\n```json\n{data_md}\n```'
         return PlainTextResponse(content=content)
-    elif format == 'csv':
+    elif export_format == 'csv':
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(['id', 'title', 'content', 'status', 'priority', 'module_type', 'data_json'])
@@ -805,7 +803,7 @@ async def export_entry(
         ])
         return PlainTextResponse(content=output.getvalue())
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {export_format}')
 
 
 ############################
@@ -1556,7 +1554,6 @@ from open_webui.pm.intent import detect_intent
 from open_webui.pm.skills.base import BaseSkill
 from open_webui.pm.skills.prd_generation import PRDGenerationSkill
 from open_webui.pm.skills.requirement_analysis import RequirementAnalysisSkill
-from open_webui.pm.actions import validate_action
 
 SKILL_INSTANCES: dict[str, BaseSkill] = {
     'prd-generation': PRDGenerationSkill(),
@@ -1624,6 +1621,43 @@ async def _call_llm(request: Request, user, system_prompt: str, user_message: st
     except Exception as e:
         log.error(f'LLM call failed: {e}')
         return ''
+
+
+def _extract_json(llm_response: str, expect_list: bool = True):
+    """Extract JSON from LLM response that may include markdown fences or explanatory text.
+
+    LLMs often wrap JSON in ```json ... ``` blocks or add prose around it.
+    This function tries:
+    1. Direct json.loads (fast path if response is pure JSON)
+    2. Regex extraction of JSON array/object from the response
+    3. Fallback to empty list/dict
+    """
+    import re
+    if not llm_response:
+        return [] if expect_list else {}
+
+    # Fast path: direct parse
+    try:
+        result = json.loads(llm_response)
+        if expect_list and not isinstance(result, list):
+            result = [result] if result else []
+        return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Regex extraction: pull JSON array or object from the response
+    try:
+        pattern = r'\[.*\]' if expect_list else r'\{.*\}'
+        json_match = re.search(pattern, llm_response, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            if expect_list and not isinstance(result, list):
+                result = [result] if result else []
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return [] if expect_list else {}
 
 
 @router.post('/agent/chat')
@@ -1757,7 +1791,7 @@ async def create_entity(
         module_id=form_data.get('module_id'),
         feature_id=form_data.get('feature_id'),
         entry_id=form_data.get('entry_id'),
-        metadata=form_data.get('metadata'),
+        entity_metadata=form_data.get('metadata'),
     )
     entity = await PMEntities.insert_new_entity(user.id, entity_form, db=db)
     if not entity:
@@ -2273,7 +2307,7 @@ async def agent_tool_get_entry(
 # Agent Tool API Extensions
 ############################
 
-@router.delete('/agent/tools/delete_entry', response_model=dict)
+@router.post('/agent/tools/delete_entry', response_model=dict)
 async def agent_tool_delete_entry(
     form_data: PMDeleteEntryRequest,
     user=Depends(get_verified_user),
@@ -2581,12 +2615,7 @@ async def extract_parameters(
             "raw_response": None,
         }
 
-    try:
-        parameters = json.loads(llm_response)
-        if not isinstance(parameters, list):
-            parameters = [parameters] if parameters else []
-    except Exception:
-        parameters = []
+    parameters = _extract_json(llm_response, expect_list=True)
 
     return {
         "entry_id": entry_id,
@@ -2624,10 +2653,7 @@ async def analyze_entry(
             "raw_response": None,
         }
 
-    try:
-        analysis = json.loads(llm_response)
-    except Exception:
-        analysis = {}
+    analysis = _extract_json(llm_response, expect_list=False)
 
     return {
         "entry_id": entry_id,
@@ -2666,12 +2692,7 @@ async def generate_testcases(
             "raw_response": None,
         }
 
-    try:
-        testcases = json.loads(llm_response)
-        if not isinstance(testcases, list):
-            testcases = [testcases] if testcases else []
-    except Exception:
-        testcases = []
+    testcases = _extract_json(llm_response, expect_list=True)
 
     return {
         "entry_id": entry_id,
@@ -2734,9 +2755,8 @@ async def generate_content(
             "raw_response": None,
         }
 
-    try:
-        generated_content = json.loads(llm_response)
-    except Exception:
+    generated_content = _extract_json(llm_response, expect_list=False)
+    if not generated_content:
         generated_content = llm_response
 
     return {
@@ -2776,10 +2796,7 @@ async def check_entry(
             "raw_response": None,
         }
 
-    try:
-        check_result = json.loads(llm_response)
-    except Exception:
-        check_result = {}
+    check_result = _extract_json(llm_response, expect_list=False)
 
     return {
         "entry_id": entry_id,
@@ -2846,9 +2863,8 @@ async def workflow_next(
             "raw_response": None,
         }
 
-    try:
-        workflow = json.loads(llm_response)
-    except Exception:
+    workflow = _extract_json(llm_response, expect_list=False)
+    if not workflow:
         workflow = {"current_phase": "in_progress", "next_steps": [], "blocked": []}
 
     return {
@@ -2931,27 +2947,42 @@ async def execute_workflow(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Execute a workflow by running each step sequentially."""
+    import ast
     results = []
     
     for step in form_data.steps:
-        # Check condition
+        # Check condition safely — only supports simple boolean literals
         if step.condition:
             try:
-                # Simple condition evaluation (placeholder)
-                condition_met = eval(step.condition, {"__builtins__": {}}, {})
+                condition_met = ast.literal_eval(step.condition)
+                if not isinstance(condition_met, bool):
+                    condition_met = bool(condition_met)
                 if not condition_met:
                     results.append({'stepId': step.id, 'status': 'skipped'})
                     continue
-            except Exception:
-                results.append({'stepId': step.id, 'status': 'skipped'})
+            except (ValueError, SyntaxError):
+                # Cannot safely evaluate condition — skip step
+                results.append({'stepId': step.id, 'status': 'skipped', 'reason': 'unsafe condition'})
                 continue
         
-        # Execute skill
+        # Execute skill via _call_llm + skill helpers
         try:
             skill = SKILL_INSTANCES.get(step.skillId)
             if skill:
-                # Call skill with inputs
-                result = await skill.execute(step.inputs, user, db)
+                user_msg = skill.build_user_message(
+                    user_message=step.inputs.get('message', ''),
+                    project_id=step.inputs.get('project_id', ''),
+                    module_type=step.inputs.get('module_type'),
+                    entry_id=step.inputs.get('entry_id'),
+                    entry_title=step.inputs.get('entry_title'),
+                    entry_content_summary=step.inputs.get('entry_content_summary'),
+                    extra_data=step.inputs.get('extra_data'),
+                )
+                llm_response = await _call_llm(request, user, skill.system_prompt, user_msg)
+                if llm_response:
+                    result = skill.parse_response(llm_response)
+                else:
+                    result = {'message': skill.fallback_response(), 'actions': None}
                 results.append({'stepId': step.id, 'status': 'completed', 'result': result})
             else:
                 results.append({'stepId': step.id, 'status': 'failed', 'error': f'Skill {step.skillId} not found'})
