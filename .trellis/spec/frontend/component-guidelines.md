@@ -616,3 +616,153 @@ async function cleanupFlowchartRefsForParam(paramId: string) {
 ```
 
 Call this before `deleteEntry` in `handleDelete` when `moduleType === 'parameter'`.
+
+---
+
+## PM Module Page Patterns
+
+### Convention: moduleConfig completeness
+
+Every module type listed in the PM dashboard (`+page.svelte` at `src/routes/(app)/pm/[projectId]/`) MUST have a corresponding entry in `moduleConfig` in the module page (`[module]/+page.svelte`). If a module type is missing from `moduleConfig`, it falls through to `{ name: '未知模块', editorType: 'rich' }` which may not render correctly.
+
+**Current module types (16)**: requirement, parameter, testcase, prd, risk, competitor, roadmap, meeting, acceptance, faq, product-architecture, prototype, schedule, requirement-boundary, spec, flowchart
+
+### Gotcha: Adding new editorType values
+
+When adding a new `editorType` (e.g. 'flowchart', 'competitor'), you MUST update ALL condition branches that check editor type:
+
+1. **View rendering condition** (`isFormView || isMindmapView`): Add `isFlowchartView` if the new type needs card-list rendering
+2. **Content loading** (`openEntryEditor`): Add the new type to the content loading logic
+3. **Editor overlay rendering** (`editingEntryId && (isRichView || ...)`): Add `isFlowchartView` or the new type flag
+4. **TypeScript type**: Add to `EditorType` union type
+
+```typescript
+// Wrong: New editorType not in rendering condition
+let isFormView = $derived(config.editorType === 'form');
+let isMindmapView = $derived(config.editorType === 'mindmap');
+// Missing: isFlowchartView!
+
+// Correct: All editor types have derived flags and are included in conditions
+let isFormView = $derived(config.editorType === 'form');
+let isMindmapView = $derived(config.editorType === 'mindmap');
+let isFlowchartView = $derived(config.editorType === 'flowchart');
+```
+
+### Pattern: Empty state handling for all views
+
+Every module view (table, form, mindmap, flowchart) must have explicit empty state handling with a call-to-action:
+
+```svelte
+{:else if isMindmapView}
+    {#if moduleType === 'product-architecture'}
+        {#if loadError}
+            <!-- Error state with retry -->
+            <div class="py-12 text-center">
+                <p class="text-sm text-red-500">{loadError}</p>
+                <button onclick={loadEntries}>重试</button>
+            </div>
+        {:else if filteredEntries.length === 0}
+            <!-- Empty state with CTA -->
+            <div class="py-12 text-center">
+                <p>还没有产品架构条目</p>
+                <button onclick={() => { showNewForm = true; }}>创建第一个架构条目</button>
+            </div>
+        {:else}
+            <!-- Actual mindmap content -->
+            <PMMindMap ... />
+        {/if}
+    {/if}
+```
+
+### Pattern: API error surfacing
+
+Non-critical API failures (e.g., `loadRelatedEntries`) must be surfaced to users, not just `console.warn`:
+
+```typescript
+let loadRelatedError = $state('');
+
+async function loadRelatedEntries() {
+    try {
+        loadRelatedError = '';
+        // ... API calls
+    } catch (e: any) {
+        console.warn('[PM] loadRelatedEntries failed:', e?.message);
+        loadRelatedError = e?.message || '加载关联数据失败';
+    }
+}
+```
+
+```svelte
+{#if loadRelatedError}
+    <div class="px-3.5 py-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg flex items-center gap-2">
+        <svg ...warning icon... />
+        <span class="text-xs text-yellow-600">部分关联数据加载失败：{loadRelatedError}</span>
+        <button onclick={loadRelatedEntries}>重试</button>
+    </div>
+{/if}
+```
+
+### Don't: Using separate module-specific API files
+
+The `src/lib/apis/pm/modules/product-architecture.ts` uses endpoint paths like `/projects/{id}/modules/product-architecture` which do NOT match the unified backend entries route. The main page correctly uses `getEntries(token, projectId, 'product-architecture')` instead.
+
+**Wrong**:
+```typescript
+// product-architecture.ts - paths don't match backend
+export function getProductArchitectureList(projectId: string) {
+    return getOne<ModuleEntry[]>(`/projects/${projectId}/modules/${MODULE}?${params}`);
+}
+```
+
+**Correct**:
+```typescript
+// index.ts - unified entries API
+export async function getEntries(token: string, projectId: string, moduleType?: string) {
+    const query = moduleType ? `?module_type=${moduleType}` : '';
+    const response = await fetch(`${PM_API_BASE}/projects/${projectId}/entries${query}`, ...);
+}
+```
+
+---
+
+## Reusable Form Components
+
+### Pattern: PMForm* component family
+
+Five reusable form components extracted from the monolithic module page:
+
+| Component | Purpose | Key Props |
+|-----------|---------|-----------|
+| `PMFormInput` | Text/number/date input | label, value, placeholder, type, disabled |
+| `PMFormTextarea` | Multi-line input | label, value, placeholder, rows, disabled |
+| `PMFormSelect` | Dropdown select | label, value, options ({value, label}[]), disabled |
+| `PMFormSection` | Grouped form section | title |
+| `PMFormToggleGroup` | Button toggle selector | label, options ({value, label, color}[]), selected, onchange |
+
+All components:
+- Use Svelte 5 runes (`$props`, `$bindable`)
+- Consistent Tailwind classes: `bg-gray-50 dark:bg-gray-850 rounded-xl focus:ring-2 focus:ring-blue-500`
+- a11y: `<label for>` + `<input id>` association
+- Dark mode support
+
+```svelte
+<!-- Example: PMFormInput usage -->
+<PMFormInput
+    label="参数 Key"
+    placeholder="输入参数标识"
+    bind:value={newParamKey}
+    onkeydown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+/>
+
+<!-- Example: PMFormToggleGroup usage -->
+<PMFormToggleGroup
+    label="优先级"
+    options={[
+        { value: 'p0', label: 'P0', color: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' },
+        { value: 'p1', label: 'P1', color: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' },
+        { value: 'p2', label: 'P2', color: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
+        { value: 'p3', label: 'P3', color: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' }
+    ]}
+    bind:selected={newPriority}
+/>
+```
