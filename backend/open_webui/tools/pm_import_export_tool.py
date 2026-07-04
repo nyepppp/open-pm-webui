@@ -185,3 +185,125 @@ class Tools:
                     return json.dumps({"status": "cancelled", "message": "用户取消了写入操作", "preview": result}, ensure_ascii=False)
 
         return json.dumps(result, ensure_ascii=False)
+
+    def _entry_to_markdown(self, entry: dict) -> str:
+        title = entry.get("title", "Untitled")
+        module_type = entry.get("module_type", "unknown")
+        status = entry.get("status", "draft")
+        priority = entry.get("priority", "")
+        content = entry.get("content", "")
+        entry_data = entry.get("data", {})
+
+        lines = [
+            f"# {title}",
+            "",
+            f"- **类型**: {module_type}",
+            f"- **状态**: {status}",
+        ]
+        if priority:
+            lines.append(f"- **优先级**: {priority}")
+        lines.append("")
+
+        if content:
+            lines.append(content)
+            lines.append("")
+
+        if isinstance(entry_data, dict) and entry_data:
+            lines.append("## 详细信息")
+            lines.append("")
+            for key, value in entry_data.items():
+                if key in ("node_type", "start_date", "end_date", "dependencies"):
+                    lines.append(f"- **{key}**: {value}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    async def sync_entries_to_knowledge(self, project_id: str, knowledge_id: str = None, __event_call__: callable = None, __event_emitter__: callable = None, __user__: dict = None) -> str:
+        """
+        将项目条目同步到 Knowledge Base（预览后确认）
+
+        :param project_id: 项目 ID
+        :param knowledge_id: 目标知识库 ID (可选，不提供则自动创建)
+        :param __event_call__: 事件回调 (可选，用于确认流程)
+        :param __event_emitter__: 事件发射器 (可选，用于预览)
+        :return: 同步结果
+        """
+        entries_result = await self._request("GET", f"/pm/projects/{project_id}/entries")
+        if isinstance(entries_result, dict) and "error" in entries_result:
+            return json.dumps(entries_result, ensure_ascii=False)
+
+        entries = entries_result if isinstance(entries_result, list) else entries_result.get("items", entries_result.get("data", []))
+        if not entries:
+            return json.dumps({"status": "no_data", "message": f"项目 {project_id} 没有条目可同步"}, ensure_ascii=False)
+
+        markdown_files = []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("title"):
+                md_content = self._entry_to_markdown(entry)
+                markdown_files.append({
+                    "filename": f"{entry.get('module_type', 'entry')}_{entry.get('id', 'unknown')}.md",
+                    "content": md_content,
+                    "entry_id": entry.get("id"),
+                    "title": entry.get("title"),
+                })
+
+        preview_lines = [f"将同步 **{len(markdown_files)}** 个条目到 Knowledge Base:"]
+        for mf in markdown_files[:10]:
+            preview_lines.append(f"  - {mf['filename']} ({mf['title']})")
+        if len(markdown_files) > 10:
+            preview_lines.append(f"  - ... 还有 {len(markdown_files) - 10} 个")
+        await self._emit_preview("\n".join(preview_lines), __event_emitter__)
+
+        if __event_call__:
+            confirm = await __event_call__({
+                "type": "confirmation",
+                "data": {
+                    "title": "确认同步到 Knowledge Base",
+                    "message": f"将同步 {len(markdown_files)} 个条目到知识库。确认？"
+                }
+            })
+            if not confirm:
+                return json.dumps({"status": "cancelled", "message": "用户取消了同步操作"}, ensure_ascii=False)
+
+        if not knowledge_id:
+            kb_result = await self._request("POST", "/knowledge/create", {
+                "name": f"PM Project {project_id}",
+                "description": f"PM 项目 {project_id} 的条目知识库，包含需求、PRD、参数等文档"
+            })
+            if isinstance(kb_result, dict) and "error" in kb_result:
+                return json.dumps(kb_result, ensure_ascii=False)
+            knowledge_id = kb_result.get("id")
+            if not knowledge_id:
+                return json.dumps({"error": "Failed to create knowledge base", "detail": kb_result}, ensure_ascii=False)
+
+        synced = []
+        errors = []
+        for mf in markdown_files:
+            try:
+                upload_result = await self._request("POST", "/files/", {
+                    "filename": mf["filename"],
+                    "content": mf["content"]
+                })
+                file_id = upload_result.get("id")
+                if not file_id:
+                    errors.append({"file": mf["filename"], "error": "upload failed", "detail": upload_result})
+                    continue
+
+                add_result = await self._request("POST", f"/knowledge/{knowledge_id}/file/add", {
+                    "file_id": file_id
+                })
+                if isinstance(add_result, dict) and "error" in add_result:
+                    errors.append({"file": mf["filename"], "error": "add to knowledge failed", "detail": add_result})
+                else:
+                    synced.append(mf["filename"])
+            except Exception as e:
+                errors.append({"file": mf["filename"], "error": str(e)})
+
+        return json.dumps({
+            "status": "completed",
+            "knowledge_id": knowledge_id,
+            "synced_count": len(synced),
+            "error_count": len(errors),
+            "synced_files": synced,
+            "errors": errors,
+        }, ensure_ascii=False)
