@@ -21,7 +21,9 @@ export type ModuleType =
 	| 'product-architecture'
 	| 'prototype'
 	| 'schedule'
-	| 'requirement-boundary';
+	| 'requirement-boundary'
+	| 'spec'
+	| 'flowchart';
 
 export type ModuleCategory = 'planning' | 'design' | 'execution' | 'review';
 
@@ -465,4 +467,58 @@ export interface PaginatedResponse<T> {
 	page: number;
 	pageSize: number;
 	hasMore: boolean;
+}
+
+export interface FlowchartData {
+	nodes: FlowchartNode[];
+	edges: FlowchartEdge[];
+	viewport?: { x: number; y: number; zoom: number };
+	nodeTypes?: Record<string, CustomNodeType>;
+}
+
+export interface CustomNodeType {
+	label: string;
+	defaultStyle: NodeStyle;
+	icon?: string;
+	description?: string;
+}
+
+export interface NodeStyle {
+	backgroundColor?: string;
+	borderColor?: string;
+	borderWidth?: number;
+	borderRadius?: number;
+	width?: number;
+	height?: number;
+	icon?: string;
+	shape?: 'rectangle' | 'rounded' | 'circle' | 'diamond' | 'ellipse';
+}
+
+export interface FlowchartNode {
+	id: string;
+	type: string;
+	position: { x: number; y: number };
+	data: {
+		label: string;
+		description?: string;
+		style?: Partial<NodeStyle>;
+		inputParams?: string[];
+		outputParams?: string[];
+	};
+}
+
+export interface FlowchartEdge {
+	id: string;
+	source: string;
+	target: string;
+	label?: string;
+	type?: 'default' | 'conditional';
+	style?: EdgeStyle;
+}
+
+export interface EdgeStyle {
+	stroke?: string;
+	strokeWidth?: number;
+	strokeDasharray?: string;
+	animated?: boolean;
 }

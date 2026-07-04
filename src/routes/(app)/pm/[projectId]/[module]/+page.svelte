@@ -24,11 +24,15 @@
 	import { currentProjectName } from '$lib/stores/pm/projectStore';
 	import type { AgentAction } from '$lib/apis/pm/types';
 	import mammoth from 'mammoth';
+	import PMSpecTemplateDialog from '$lib/components/pm/PMSpecTemplateDialog.svelte';
+	import PMSpecGlossaryPanel from '$lib/components/pm/PMSpecGlossaryPanel.svelte';
+	import { SPEC_TEMPLATES, type SpecTemplate } from '$lib/components/pm/specTemplates';
+	import PMFlowchartEditor from '$lib/components/pm/PMFlowchartEditor.svelte';
 
 	let projectId = $derived($page.params.projectId);
 	let moduleType = $derived($page.params.module as ModuleType);
 
-	type EditorType = 'rich' | 'table' | 'form' | 'mindmap';
+	type EditorType = 'rich' | 'table' | 'form' | 'mindmap' | 'flowchart' | 'competitor';
 	interface ModuleConf { name: string; editorType: EditorType; tableColumns?: { key: string; label: string; width?: string }[]; formFields?: { key: string; label: string; type: 'text' | 'textarea' | 'select' }[] }
 
 	const moduleConfig: Record<string, ModuleConf> = {
@@ -65,7 +69,7 @@
 			{ key: 'featureName', label: '关联功能块', type: 'select' },
 			{ key: 'owner', label: '负责人', type: 'text' }, { key: 'measures', label: '应对措施', type: 'textarea' }
 		]},
-		competitor: { name: '竞品分析', editorType: 'competitor', formFields: [
+		competitor: { name: '竞品分析', editorType: 'competitor' as EditorType, formFields: [
 			{ key: 'competitorUrl', label: '竞品URL', type: 'text' }, { key: 'dimension', label: '分析维度', type: 'text' },
 			{ key: 'ourProduct', label: '我方产品', type: 'textarea' }, { key: 'competitorProduct', label: '竞品', type: 'textarea' },
 			{ key: 'analysis', label: '分析结论', type: 'textarea' }
@@ -111,7 +115,9 @@
 			{ key: 'expectedEffect', label: '预期效果', type: 'textarea' },
 			{ key: 'relatedRequirements', label: '关联需求', type: 'select' },
 			{ key: 'relatedParameters', label: '关联参数', type: 'select' }
-		]}
+		]},
+		spec: { name: 'SPEC 规范', editorType: 'rich' },
+		flowchart: { name: '流程图', editorType: 'flowchart' }
 	};
 
 	let config = $derived(moduleConfig[moduleType] || { name: '未知模块', editorType: 'rich' as EditorType });
@@ -171,13 +177,22 @@
 	// PRD editor version
 	let editingVersionId = $state('');
 
+	// SPEC-specific
+	let showSpecTemplateDialog = $state(false);
+	let specCategory = $state<'functional' | 'prototype'>('functional');
+	let showGlossaryPanel = $state(false);
+	let specEditorInstance: any = $state(null);
+	let specRelatedRequirements = $state<string[]>([]);
+	let specRelatedParameters = $state<string[]>([]);
+	let showSpecTemplateManager = $state(false);
+
 	// Testcase related entries for dropdowns
 	let requirementEntries = $state<any[]>([]);
 	let parameterEntries = $state<any[]>([]);
 	let prdEntries = $state<any[]>([]);
 	let featureOptions = $derived([...new Set(parameterEntries.map((p: any) => (p.data || p.metadata || {}).featureName).filter(Boolean))]);
-	let moduleOptions = $derived([...new Set(filteredEntries.map((e: any) => (e.data || e.metadata || {}).moduleName).filter(Boolean))].sort());
-	let featureOptionsForModule = $derived(newModuleName ? [...new Set(filteredEntries.filter((e: any) => (e.data || e.metadata || {}).moduleName === newModuleName).map((e: any) => (e.data || e.metadata || {}).featureName).filter(Boolean))].sort() : []);
+	let moduleOptions = $derived([...new Set(entries.map((e: any) => (e.data || e.metadata || {}).moduleName).filter(Boolean))].sort());
+	let featureOptionsForModule = $derived(newModuleName ? [...new Set(entries.filter((e: any) => (e.data || e.metadata || {}).moduleName === newModuleName).map((e: any) => (e.data || e.metadata || {}).featureName).filter(Boolean))].sort() : []);
 
 	// Reset feature when module changes
 	$effect(() => {
@@ -196,6 +211,10 @@
 			}
 			if (moduleType === 'parameter') {
 				prdEntries = await getEntries(token, projectId, 'prd');
+			}
+			if (moduleType === 'spec') {
+				requirementEntries = await getEntries(token, projectId, 'requirement');
+				parameterEntries = await getEntries(token, projectId, 'parameter');
 			}
 		} catch (e: any) {
 			console.warn('[PM] loadRelatedEntries failed:', e?.message);
@@ -224,7 +243,7 @@
 	}
 	let _loadAbort: AbortController | null = null;
 	onMount(() => { loadEntries(); loadRelatedEntries(); });
-	$effect(() => { moduleType; showNewForm = false; newFormData = {}; _loadAbort?.abort(); loadEntries(); loadRelatedEntries(); });
+	$effect(() => { moduleType; showNewForm = false; newFormData = {}; if (_loadAbort) { _loadAbort.abort(); _loadAbort = null; } loadEntries(); loadRelatedEntries(); });
 
 	async function handleCreate() {
 		if (!newTitle.trim()) return;
@@ -249,6 +268,8 @@
 				const dims: { name: string; ourScore: number; competitorScore: number; notes: string }[] = [];
 				if (newFormData.dim1Name) dims.push({ name: newFormData.dim1Name, ourScore: Number(newFormData.dim1Our) || 50, competitorScore: Number(newFormData.dim1Comp) || 50, notes: '' });
 				data.data = { competitorUrl: newFormData.competitorUrl, description: newFormData.description, dimensions: dims };
+			} else if (moduleType === 'spec') {
+				data.data = { specCategory, relatedRequirements: specRelatedRequirements, relatedParameters: specRelatedParameters };
 			} else if (config.editorType === 'form') {
 				data.data = { ...newFormData };
 			}
@@ -280,6 +301,20 @@
 		newVersionId = '';
 		newProtoType = 'image'; newAssignee = ''; newProgress = ''; newIsMilestone = false; newScheduleStatus = 'draft';
 		newFormData = {}; showNewForm = false;
+		specRelatedRequirements = []; specRelatedParameters = [];
+	}
+
+	// SPEC: Template selection flow
+	function handleSpecCreate() {
+		showSpecTemplateDialog = true;
+	}
+	function handleSpecTemplateSelect(template: SpecTemplate | null) {
+		if (template) {
+			newContent = template.content;
+			specCategory = template.category;
+		}
+		showSpecTemplateDialog = false;
+		showNewForm = true;
 	}
 	async function handleDelete(entryId: string) { try { const token = localStorage.token || ''; await deleteEntry(token, entryId); await loadEntries(); toast.success('删除成功'); } catch (e: any) { toast.error(e.message || '删除失败'); } }
 	async function handleExportToNote(entry: any) { try { const token = localStorage.token || ''; await createNewNote(token, { title: `[PM] ${entry.title}`, data: { content: { md: entry.content || '', html: '', json: null } }, meta: null, access_grants: [] }); toast.success('已导出为笔记'); } catch (e: any) { toast.error(e.message || '导出失败'); } }
@@ -306,11 +341,11 @@
 		}
 		result = [...result].sort((a, b) => {
 			let va: number | string, vb: number | string;
-			if (sortField === 'updatedAt') { va = a.updated_at || a.updatedAt || 0; vb = b.updated_at || b.updatedAt || 0; }
-			else if (sortField === 'createdAt') { va = a.created_at || a.createdAt || 0; vb = b.created_at || b.createdAt || 0; }
-			else if (sortField === 'priority') { const po: Record<string, number> = { p0: 0, p1: 1, p2: 2, p3: 3 }; va = po[a.priority] ?? 9; vb = po[b.priority] ?? 9; }
+			if (sortField === 'updatedAt') { va = a.updatedAt || 0; vb = b.updatedAt || 0; }
+			else if (sortField === 'createdAt') { va = a.createdAt || 0; vb = b.createdAt || 0; }
+			else if (sortField === 'priority') { const po: Record<string, number> = { p0: 0, p1: 1, p2: 2, p3: 3 }; va = po[a.priority ?? ''] ?? 9; vb = po[b.priority ?? ''] ?? 9; }
 			else if (sortField === 'versionNumber') { va = a.currentVersionNumber || ''; vb = b.currentVersionNumber || ''; }
-			else { va = a.updated_at || a.updatedAt || 0; vb = b.updated_at || b.updatedAt || 0; }
+			else { va = a.updatedAt || 0; vb = b.updatedAt || 0; }
 			if (va < vb) return sortDir === 'asc' ? -1 : 1;
 			if (va > vb) return sortDir === 'asc' ? 1 : -1;
 			return 0;
@@ -378,7 +413,8 @@
 	let isFormView = $derived(config.editorType === 'form');
 	let isRichView = $derived(config.editorType === 'rich');
 	let isMindmapView = $derived(config.editorType === 'mindmap');
-	let isCompetitorView = $derived(config.editorType === 'competitor');
+	let isCompetitorView = $derived(config.editorType === ('competitor' as EditorType));
+	let isFlowchartView = $derived(config.editorType === 'flowchart');
 
 	// Roadmap view toggle
 	let roadmapView = $state<'table' | 'gantt'>('table');
@@ -508,6 +544,15 @@
 			editingDocStatus = editingEntry.status || 'draft';
 			editingVersionId = getEntryData(editingEntry, 'versionId') || editingEntry.versionId || '';
 
+			// SPEC: load category and relation metadata
+			if (moduleType === 'spec') {
+				const specData = editingEntry.data || editingEntry.metadata || {};
+				specCategory = specData.specCategory || 'functional';
+				specRelatedRequirements = specData.relatedRequirements || [];
+				specRelatedParameters = specData.relatedParameters || [];
+				showGlossaryPanel = false;
+			}
+
 			if (moduleType === 'prd') {
 				const data = editingEntry.data || editingEntry.metadata || {};
 				editingSections = data.sections?.length ? data.sections : [...defaultSections];
@@ -582,10 +627,16 @@
 				});
 			} else {
 				const autoVid = editingVersionId || editingEntry?.data?.versionId || '';
+				const specData: Record<string, unknown> = { ...(editingEntry?.data || {}), versionId: autoVid };
+				if (moduleType === 'spec') {
+					specData.specCategory = specCategory;
+					specData.relatedRequirements = specRelatedRequirements;
+					specData.relatedParameters = specRelatedParameters;
+				}
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle, status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: { ...(editingEntry?.data || {}), versionId: autoVid },
+					data: specData,
 					versionId: autoVid
 				});
 			}
@@ -913,10 +964,21 @@
 					</div>
 				{/if}
 				{#if !showNewForm}
-					<button class="px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center" onclick={() => { showNewForm = true; }}>
-						<svg class="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-						<div class="ml-1 text-xs">新建</div>
-					</button>
+					{#if moduleType === 'spec'}
+						<button class="px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center" onclick={handleSpecCreate}>
+							<svg class="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+							<div class="ml-1 text-xs">新建 SPEC</div>
+						</button>
+						<button class="px-2 py-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 transition font-medium text-sm flex items-center hover:bg-gray-50 dark:hover:bg-gray-800" onclick={() => { showSpecTemplateManager = true; }}>
+							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+							<div class="ml-1 text-xs">模板管理</div>
+						</button>
+					{:else}
+						<button class="px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center" onclick={() => { showNewForm = true; }}>
+							<svg class="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+							<div class="ml-1 text-xs">新建</div>
+						</button>
+					{/if}
 				{/if}
 			</div>
 		</div>
@@ -1159,7 +1221,7 @@
 		{:else if filteredEntries.length === 0}
 			<div class="py-12 text-center">
 				<p class="text-sm text-gray-500 dark:text-gray-400">{query ? '没有找到匹配的条目' : `还没有${config.name}条目`}</p>
-				{#if !query && !showNewForm}<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个条目</button>{/if}
+				{#if !query && !showNewForm}<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { if (moduleType === 'spec') { handleSpecCreate(); } else { showNewForm = true; } }}>创建第一个条目</button>{/if}
 			</div>
 		{:else if isTableView && (moduleType === 'roadmap' || moduleType === 'schedule') && roadmapView === 'gantt'}
 			{#key filteredEntries}
@@ -1525,6 +1587,15 @@
 									<span class="px-1 py-0.5 rounded text-[10px] {dim.ourScore >= dim.competitorScore ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400' : 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400'}">{dim.name || '维度'} {dim.ourScore}:{dim.competitorScore}</span>
 								{/each}
 							</div>
+						{:else if moduleType === 'spec'}
+							<div class="flex gap-2 mt-1 items-center">
+								<span class="px-1.5 py-0.5 rounded text-[10px] font-medium {(getEntryData(entry, 'specCategory') || 'functional') === 'prototype' ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'}">{(getEntryData(entry, 'specCategory') || 'functional') === 'prototype' ? '前端原型' : '功能'}</span>
+								{#if (getEntryData(entry, 'relatedRequirements') || []).length || (getEntryData(entry, 'relatedParameters') || []).length}
+									<span class="px-1.5 py-0.5 rounded text-[10px] bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+										{#if (getEntryData(entry, 'relatedRequirements') || []).length}{(getEntryData(entry, 'relatedRequirements') || []).length} 需求{/if}{#if (getEntryData(entry, 'relatedRequirements') || []).length && (getEntryData(entry, 'relatedParameters') || []).length} / {/if}{#if (getEntryData(entry, 'relatedParameters') || []).length}{(getEntryData(entry, 'relatedParameters') || []).length} 参数{/if}
+									</span>
+								{/if}
+							</div>
 						{:else if entry.content}
 							<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{entry.content}</div>
 						{/if}
@@ -1553,8 +1624,7 @@
 	</div>
 </div>
 
-<!-- Entry Editor (rich text, form, mindmap) -->
-{#if editingEntryId && (isRichView || isFormView || isMindmapView || isCompetitorView)}
+{#if editingEntryId && (isRichView || isFormView || isMindmapView || isCompetitorView || isFlowchartView)}
 	<div class="fixed inset-0 z-50 bg-white dark:bg-gray-900 flex flex-col">
 		<div class="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700">
 			<div class="flex items-center gap-3">
@@ -1937,27 +2007,83 @@
 							/>
 						</div>
 					</div>
+				{:else if isFlowchartView && editingEntry}
+					<div class="h-full flex flex-col">
+						<div class="flex-1">
+							<PMFlowchartEditor
+								flowchartData={(editingEntry?.data?.flowchart || { nodes: [], edges: [] })}
+								onChange={(updatedFlowchart) => {
+									if (!editingEntry) return;
+									const d = { ...(editingEntry.data || {}) };
+									d.flowchart = updatedFlowchart;
+									editingEntry = { ...editingEntry, data: d };
+									saveStatus = 'unsaved';
+									triggerAutoSave();
+								}}
+								readonly={false}
+							/>
+						</div>
+					</div>
 				{:else}
-					<div class="h-full">
-						<PMRichEditor
-							content={editingContentHtml}
-							onChange={(html) => {
-								editingContentHtml = html;
-								editingContentMd = html;
-								// Update current section content in editingSections
-								if (moduleType === 'prd' && editingActiveSection) {
-									const idx = editingSections.findIndex(s => s.id === editingActiveSection);
-									if (idx >= 0) {
-										editingSections[idx] = { ...editingSections[idx], content: html };
-										editingSections = [...editingSections];
+					<!-- SPEC: Category + Relations bar -->
+					{#if moduleType === 'spec'}
+						<div class="flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-850/50">
+							<div class="flex items-center gap-1.5">
+								<label class="text-xs font-medium text-gray-500 dark:text-gray-400">分类</label>
+								<select class="text-xs px-2 py-1 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-hidden" bind:value={specCategory}>
+									<option value="functional">功能 SPEC</option>
+									<option value="prototype">前端原型 SPEC</option>
+								</select>
+							</div>
+							<div class="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
+							<div class="flex items-center gap-1.5">
+								<label class="text-xs font-medium text-gray-500 dark:text-gray-400">关联需求</label>
+								<select class="text-xs px-2 py-1 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-hidden max-w-[140px]" multiple onchange={(e) => { const opts = Array.from((e.target as HTMLSelectElement).selectedOptions).map(o => o.value); specRelatedRequirements = opts; }}>
+									{#each requirementEntries as req (req.id)}
+										<option value={req.id} selected={specRelatedRequirements.includes(req.id)}>{req.title}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="flex items-center gap-1.5">
+								<label class="text-xs font-medium text-gray-500 dark:text-gray-400">关联参数</label>
+								<select class="text-xs px-2 py-1 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-hidden max-w-[140px]" multiple onchange={(e) => { const opts = Array.from((e.target as HTMLSelectElement).selectedOptions).map(o => o.value); specRelatedParameters = opts; }}>
+									{#each parameterEntries as param (param.id)}
+										<option value={param.id} selected={specRelatedParameters.includes(param.id)}>{param.title}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+					{/if}
+					<div class="flex-1 flex min-h-0">
+						<div class="flex-1 min-w-0">
+							<PMRichEditor
+								content={editingContentHtml}
+								onChange={(html) => {
+									editingContentHtml = html;
+									editingContentMd = html;
+									// Update current section content in editingSections
+									if (moduleType === 'prd' && editingActiveSection) {
+										const idx = editingSections.findIndex(s => s.id === editingActiveSection);
+										if (idx >= 0) {
+											editingSections[idx] = { ...editingSections[idx], content: html };
+											editingSections = [...editingSections];
+										}
 									}
-								}
-								saveStatus = 'unsaved';
-								triggerAutoSave();
-							}}
-							placeholder="在此编写内容..."
-							showToc={true}
-						/>
+									saveStatus = 'unsaved';
+									triggerAutoSave();
+								}}
+								placeholder="在此编写内容..."
+								showToc={true}
+							/>
+						</div>
+						<!-- SPEC: Glossary panel for prototype category -->
+						{#if moduleType === 'spec' && specCategory === 'prototype'}
+							<PMSpecGlossaryPanel
+								visible={showGlossaryPanel}
+								editor={specEditorInstance}
+								onToggle={() => { showGlossaryPanel = !showGlossaryPanel; }}
+							/>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -2314,3 +2440,85 @@
 	onSaveNewVersion={async () => { showSaveVersionDialog = false; await saveAsNewVersion(); }}
 	onSaveContentOnly={() => { showSaveVersionDialog = false; toast.success('内容已保存'); }}
 />
+
+<!-- SPEC: Template Selection Dialog -->
+<PMSpecTemplateDialog
+	open={showSpecTemplateDialog}
+	onSelect={handleSpecTemplateSelect}
+	onClose={() => { showSpecTemplateDialog = false; }}
+	customTemplates={entries.filter((e: any) => e.moduleType === 'spec' && (e.data || e.metadata)?.role === 'template')}
+/>
+
+<!-- SPEC: Template Manager Drawer -->
+{#if showSpecTemplateManager}
+	<div class="fixed inset-0 z-40 bg-black/30" onclick={() => { showSpecTemplateManager = false; }}></div>
+	<div class="fixed top-0 right-0 z-50 h-full w-full max-w-md bg-white dark:bg-gray-900 shadow-xl flex flex-col">
+		<div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+			<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">模板管理</h3>
+			<button class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition" onclick={() => { showSpecTemplateManager = false; }}>
+				<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+			</button>
+		</div>
+		<div class="flex-1 overflow-y-auto p-4 space-y-3">
+			<!-- Built-in templates -->
+			<h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">内置模板</h4>
+			{#each SPEC_TEMPLATES as tmpl (tmpl.id)}
+				<div class="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+					<div class="flex items-center gap-2 mb-1">
+						<span class="text-sm font-medium text-gray-700 dark:text-gray-300">{tmpl.name}</span>
+						<span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {tmpl.category === 'functional' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'}">
+							{tmpl.category === 'functional' ? '功能' : '前端原型'}
+						</span>
+						<span class="px-1.5 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">内置</span>
+					</div>
+					<p class="text-xs text-gray-400 dark:text-gray-500">{tmpl.content.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 80)}...</p>
+				</div>
+			{/each}
+
+			<!-- Custom templates -->
+			<h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide pt-3">自定义模板</h4>
+			{#each entries.filter((e: any) => e.moduleType === 'spec' && (e.data || e.metadata)?.role === 'template') as tmpl (tmpl.id)}
+				<div class="p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 transition">
+					<div class="flex items-center justify-between mb-1">
+						<div class="flex items-center gap-2">
+							<span class="text-sm font-medium text-gray-700 dark:text-gray-300">{tmpl.title}</span>
+							<span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {(tmpl.data || tmpl.metadata)?.specCategory === 'prototype' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}">
+								{(tmpl.data || tmpl.metadata)?.specCategory === 'prototype' ? '前端原型' : '功能'}
+							</span>
+						</div>
+						<button class="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition" onclick={async () => { try { const token = localStorage.token || ''; await deleteEntry(token, tmpl.id); await loadEntries(); toast.success('模板已删除'); } catch (e: any) { toast.error(e.message || '删除失败'); } }}>
+							<svg class="w-3.5 h-3.5 text-gray-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+						</button>
+					</div>
+					<p class="text-xs text-gray-400 dark:text-gray-500">{(tmpl.content || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 80)}</p>
+				</div>
+			{/each}
+
+			<!-- Create custom template -->
+			<button class="w-full p-3 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 transition flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400" onclick={async () => {
+				const name = prompt('输入模板名称：');
+				if (!name?.trim()) return;
+				const cat = confirm('点击"确定"选择前端原型 SPEC，"取消"选择功能 SPEC') ? 'prototype' : 'functional';
+				try {
+					const token = localStorage.token || '';
+					const tmplContent = SPEC_TEMPLATES.find(t => t.category === cat)?.content || '<h2>概述</h2><p>在此编写...</p>';
+					await createEntry(token, projectId, {
+						module_type: 'spec',
+						title: name.trim(),
+						content: tmplContent,
+						status: 'draft',
+						priority: 'p2',
+						data: { role: 'template', specCategory: cat }
+					});
+					await loadEntries();
+					toast.success('模板创建成功');
+				} catch (e: any) {
+					toast.error(e.message || '创建失败');
+				}
+			}}>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+				新建自定义模板
+			</button>
+		</div>
+	</div>
+{/if}
