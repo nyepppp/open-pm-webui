@@ -101,6 +101,21 @@ export const productArchitectureFields: FieldConfig[] = [
 	{ name: 'autoExtracted', label: '自动提取', type: 'select', options: ['是', '否'] }
 ];
 
+export const requirementBoundaryFields: FieldConfig[] = [
+	{ name: 'scenario', label: '场景', type: 'textarea', required: true, placeholder: '描述需求边界场景' },
+	{ name: 'function', label: '功能', type: 'textarea', placeholder: '功能描述' },
+	{ name: 'usage', label: '使用方式', type: 'textarea', placeholder: '使用方式说明' },
+	{ name: 'expectedEffect', label: '预期效果', type: 'textarea', placeholder: '预期效果描述' },
+	{ name: 'relatedRequirements', label: '关联需求', type: 'text', placeholder: '关联需求ID' },
+	{ name: 'relatedParameters', label: '关联参数', type: 'text', placeholder: '关联参数ID' }
+];
+
+export const specFields: FieldConfig[] = [
+	{ name: 'specCategory', label: 'SPEC分类', type: 'select', options: ['functional', 'prototype'] },
+	{ name: 'relatedRequirements', label: '关联需求', type: 'text', placeholder: '关联需求ID列表' },
+	{ name: 'relatedParameters', label: '关联参数', type: 'text', placeholder: '关联参数ID列表' }
+];
+
 // ============================================================================
 // Module field registry - maps module type to its field configuration
 // ============================================================================
@@ -118,6 +133,8 @@ export const moduleFieldRegistry: Record<string, FieldConfig[]> = {
 	prototype: prototypeFields,
 	roadmap: roadmapFields,
 	'product-architecture': productArchitectureFields,
+	'requirement-boundary': requirementBoundaryFields,
+	spec: specFields,
 };
 
 // ============================================================================
@@ -225,6 +242,20 @@ export const moduleEditorConfig: Record<string, ModuleEditorConfig> = {
 		label: '项目排期',
 		icon: 'clock',
 		category: 'execution'
+	},
+	'requirement-boundary': {
+		editorType: 'form',
+		fields: requirementBoundaryFields,
+		label: '需求边界',
+		icon: 'git-branch',
+		category: 'planning'
+	},
+	spec: {
+		editorType: 'rich',
+		fields: specFields,
+		label: 'SPEC规范',
+		icon: 'document',
+		category: 'review'
 	}
 };
 
