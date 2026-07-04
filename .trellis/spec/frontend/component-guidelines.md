@@ -394,3 +394,105 @@ function insertTerm(term: string, termEn: string, definition: string) {
 ```
 
 **Why**: Svelte 5 restricts `{@const}` placement to specific structural blocks. Inside card list rendering within `{:else if}` branches, use inline expressions instead to avoid the `const_tag_invalid_placement` compiler error.
+
+---
+
+## Flowchart Module Pattern
+
+### Convention: @xyflow/svelte@0.1.x store-based API
+
+`@xyflow/svelte@0.1.x` uses Svelte `Writable` stores for `nodes` and `edges`, NOT `$state`:
+
+```typescript
+import { writable } from 'svelte/store';
+import type { Node, Edge } from '@xyflow/svelte';
+
+let nodesStore = writable<Node[]>([...]);
+let edgesStore = writable<Edge[]>([...]);
+```
+
+Pass stores as props to `<SvelteFlow>`:
+
+```svelte
+<SvelteFlow nodes={nodesStore} edges={edgesStore} onconnect={handleConnect} />
+```
+
+**Why**: The 0.1.x API was designed around Svelte stores for two-way binding. The v1 API migrates to `$state` + `bind:nodes`, but 0.1.x requires `Writable`. Do NOT use `$state` for the nodes/edges arrays passed to SvelteFlow.
+
+### Gotcha: @xyflow/svelte event syntax
+
+`@xyflow/svelte@0.1.x` mixes callback props and Svelte 4 dispatched events:
+
+- **Callback props** (lowercase): `onconnect`, `ondelete`, `onedgecreate`, `oninit`
+- **Dispatched events** (Svelte 4 syntax): `on:nodeclick`, `on:paneclick`, `on:nodedragstop`
+
+```svelte
+<!-- CORRECT: callback props use no colon -->
+<SvelteFlow onconnect={handleConnect} />
+
+<!-- CORRECT: dispatched events use on: prefix -->
+<SvelteFlow on:nodeclick={handleNodeClick} />
+
+<!-- WRONG: mixing the two -->
+<SvelteFlow onNodeClick={handleNodeClick} />
+```
+
+### Pattern: Custom node types with `as any`
+
+When registering custom Svelte 5 component nodes with `@xyflow/svelte@0.1.x`, the TypeScript types expect Svelte 4 class-based components. Use `as any` to bridge the gap:
+
+```typescript
+import type { NodeTypes } from '@xyflow/svelte';
+import DynamicNode from './flowchart/DynamicNode.svelte';
+
+const nodeTypes: NodeTypes = {
+    process: DynamicNode as any,  // Svelte 5 component vs Svelte 4 type mismatch
+};
+```
+
+**Why**: @xyflow/svelte 0.1.x type definitions expect `ComponentType<SvelteComponent>` (Svelte 4 class), but Svelte 5 components are compiled differently. The `as any` cast is safe at runtime — the component renders correctly.
+
+### Pattern: FlowchartData in entry.data.flowchart
+
+Flowchart module stores its data in `entry.data.flowchart`:
+
+```typescript
+interface FlowchartData {
+    nodes: FlowchartNode[];
+    edges: FlowchartEdge[];
+    viewport?: { x: number; y: number; zoom: number };
+    nodeTypes?: Record<string, CustomNodeType>;
+}
+```
+
+The editor receives `flowchartData` as a prop and calls `onChange(updatedFlowchartData)` on changes. The parent page persists it via:
+
+```typescript
+const d = { ...(editingEntry.data || {}) };
+d.flowchart = updatedFlowchart;
+editingEntry = { ...editingEntry, data: d };
+saveStatus = 'unsaved';
+triggerAutoSave();
+```
+
+**Why**: Consistent with how other modules store structured data in `entry.data` (parameter stores `data.fields`, spec stores `data.specCategory`, etc.).
+
+### Pattern: Debounced auto-save from store subscriptions
+
+Subscribe to SvelteFlow's writable stores and debounce the `onChange` callback:
+
+```typescript
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function emitChange(ns: Node[], es: Edge[]) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        onChange(/* transformed data */);
+    }, 300);
+}
+
+nodesStore.subscribe((ns) => { currentNodes = ns; emitChange(ns, currentEdges); });
+edgesStore.subscribe((es) => { currentEdges = es; emitChange(currentNodes, es); });
+```
+
+**Why**: Node position changes fire continuously during drag. Without debouncing, every pixel of drag triggers a save cycle. 300ms is a good balance between responsiveness and write amplification.

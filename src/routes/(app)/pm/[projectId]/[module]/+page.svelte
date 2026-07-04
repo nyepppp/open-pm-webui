@@ -2020,7 +2020,8 @@
 									saveStatus = 'unsaved';
 									triggerAutoSave();
 								}}
-								readonly={false}
+								readonly={editingEntry.status === 'approved' || editingEntry.status === 'archived'}
+								parameterEntries={parameterEntries}
 							/>
 						</div>
 					</div>
