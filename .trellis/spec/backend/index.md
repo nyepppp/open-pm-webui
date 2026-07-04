@@ -19,6 +19,7 @@ The backend is a **FastAPI + SQLAlchemy async** application. The PM module follo
 | [Error Handling](./error-handling.md) | HTTP errors, validation, client responses | ✅ Documented |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, test patterns | ✅ Documented |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | ✅ Documented |
+| [Flow Engine](./flow-engine.md) | Cross-module flow orchestration, AI-powered content generation | ✅ Documented |
 
 ---
 
