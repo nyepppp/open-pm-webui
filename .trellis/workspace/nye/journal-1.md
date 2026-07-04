@@ -239,3 +239,36 @@ Implemented PM cross-module flow orchestration: 5 flow templates (requirement_to
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: pm-backend-api: verify + fix 6 bugs
+
+**Date**: 2026-07-04
+**Task**: pm-backend-api: verify + fix 6 bugs
+**Branch**: `main`
+
+### Summary
+
+Verified all PRD R1/R2/R3 endpoints exist (64 routes total). trellis-check found 3 critical + 3 medium bugs. Fixed: (1) create_entity metadata= -> entity_metadata=, (2) execute_workflow skill.execute() -> _call_llm + skill helpers, (3) eval() -> ast.literal_eval(), (4) added _extract_json helper for robust LLM parsing, (5) DELETE -> POST for delete_entry tool, (6) format param shadow -> export_format. Updated flow-engine spec with 6 new common mistakes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a7c5e722c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

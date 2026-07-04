@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~241 | Active |
+| `journal-1.md` | ~274 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-07-04 | pm-backend-api: verify + fix 6 bugs | `a7c5e722c` | `main` |
 | 7 | 2026-07-04 | Cross-module flow orchestration engine | `fe094cd71` | `main` |
 | 6 | 2026-07-04 | PM frontend bug fixes and form UI optimization | `1ae189073` | `main` |
 | 5 | 2026-07-04 | Fix flowchart click + parameter bidirectional sync | `f485ce05f` | `main` |
