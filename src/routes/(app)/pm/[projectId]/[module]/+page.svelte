@@ -29,6 +29,11 @@
 	import PMSpecGlossaryPanel from '$lib/components/pm/PMSpecGlossaryPanel.svelte';
 	import { SPEC_TEMPLATES, type SpecTemplate } from '$lib/components/pm/specTemplates';
 	import PMFlowchartEditor from '$lib/components/pm/PMFlowchartEditor.svelte';
+	import PMFormInput from '$lib/components/pm/PMFormInput.svelte';
+	import PMFormTextarea from '$lib/components/pm/PMFormTextarea.svelte';
+	import PMFormSelect from '$lib/components/pm/PMFormSelect.svelte';
+	import PMFormSection from '$lib/components/pm/PMFormSection.svelte';
+	import PMFormToggleGroup from '$lib/components/pm/PMFormToggleGroup.svelte';
 
 	let projectId = $derived($page.params.projectId);
 	let moduleType = $derived($page.params.module as ModuleType);
@@ -128,6 +133,7 @@
 	let entries = $state<ModuleEntry[]>([]);
 	let isLoading = $state(true);
 	let loadError = $state('');
+	let loadRelatedError = $state('');
 	let query = $state('');
 	let showNewForm = $state(false);
 	let newTitle = $state('');
@@ -232,6 +238,7 @@
 
 	async function loadRelatedEntries() {
 		const token = localStorage.token || '';
+		loadRelatedError = '';
 		try {
 			if (moduleType === 'testcase' || moduleType === 'acceptance') {
 				requirementEntries = await getEntries(token, projectId, 'requirement');
@@ -249,6 +256,7 @@
 			}
 		} catch (e: any) {
 			console.warn('[PM] loadRelatedEntries failed:', e?.message);
+			loadRelatedError = e?.message || '加载关联数据失败';
 		}
 	}
 
@@ -617,7 +625,7 @@
 				editingContentHtml = editingEntry.content || '';
 				editingContentMd = '';
 				editingContentJson = '';
-			} else if (isFormView || isMindmapView) {
+			} else if (isFormView || isMindmapView || isFlowchartView) {
 				editingContentHtml = editingEntry.content || '';
 				editingContentMd = '';
 				editingContentJson = '';
@@ -1055,11 +1063,11 @@
 			<div class="px-3.5 pb-3">
 				<div class="border border-gray-200 dark:border-gray-700 rounded-2xl p-3 space-y-2">
 					{#if moduleType === 'faq'}
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 resize-none" placeholder="问题" rows="2" bind:value={newTitle}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 resize-none" placeholder="答案" rows="3" bind:value={newFormData.answer}></textarea>
+						<PMFormTextarea label="问题" placeholder="问题" rows="2" bind:value={newTitle} />
+						<PMFormTextarea label="答案" placeholder="答案" rows="3" bind:value={newFormData.answer} />
 						<div class="flex gap-2">
-							<input type="text" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="受众" bind:value={newFormData.audience} />
-							<input type="text" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="关联功能（溯源）" bind:value={newFormData.relatedFeatures} />
+							<PMFormInput label="" placeholder="受众" class="flex-1" bind:value={newFormData.audience} />
+							<PMFormInput label="" placeholder="关联功能（溯源）" class="flex-1" bind:value={newFormData.relatedFeatures} />
 						</div>
 					{:else if moduleType === 'competitor'}
 						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="竞品名称" bind:value={newTitle} />
@@ -1071,182 +1079,201 @@
 							<input type="number" min="0" max="100" class="w-16 text-sm px-2 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden text-center" placeholder="竞品" bind:value={newFormData.dim1Comp} />
 						</div>
 					{:else if moduleType === 'risk'}
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="风险描述" bind:value={newTitle} />
-						<div class="flex gap-2">
-							<span class="text-xs text-gray-500 self-center">概率：</span>
-							{#each ['high', 'medium', 'low'] as pr}
-								<button class="px-1.5 py-0.5 text-xs rounded transition {newFormData.probability === pr ? (probMap[pr]?.c || '') : INACTIVE}" onclick={() => { newFormData.probability = pr; }}>{probMap[pr].l}</button>
-							{/each}
-						</div>
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="影响范围" bind:value={newFormData.impactScope} />
-						<select class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFormData.featureName}>
-							<option value="">关联功能块（可选）</option>
-							{#each featureOptions as fo}
-								<option value={fo}>{fo}</option>
-							{/each}
-						</select>
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="负责人" bind:value={newFormData.owner} />
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="应对措施" rows="2" bind:value={newFormData.measures}></textarea>
-						<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="截止日期" bind:value={newFormData.deadline} />
+						<PMFormInput label="" placeholder="风险描述" bind:value={newTitle} />
+						<PMFormToggleGroup
+							label="概率："
+							options={[
+								{ value: 'high', label: '高', color: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' },
+								{ value: 'medium', label: '中', color: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' },
+								{ value: 'low', label: '低', color: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' }
+							]}
+							bind:selected={newFormData.probability}
+						/>
+						<PMFormInput label="" placeholder="影响范围" bind:value={newFormData.impactScope} />
+						<PMFormSelect
+							label=""
+							placeholder="关联功能块（可选）"
+							options={featureOptions.map((fo: string) => ({ value: fo, label: fo }))}
+							bind:value={newFormData.featureName}
+						/>
+						<PMFormInput label="" placeholder="负责人" bind:value={newFormData.owner} />
+						<PMFormTextarea label="" placeholder="应对措施" rows="2" bind:value={newFormData.measures} />
+						<PMFormInput label="" type="date" placeholder="截止日期" bind:value={newFormData.deadline} />
 					{:else if moduleType === 'acceptance'}
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="验收项" bind:value={newTitle} oninput={() => { newFormData.title = newTitle; }} />
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="验收范围" rows="2" bind:value={newFormData.scope}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="通过项（每行一个）" rows="2" bind:value={newFormData.passedItems}></textarea>
-						<div class="flex gap-2">
-							<span class="text-xs text-gray-500 self-center">结果：</span>
-							{#each ['pass', 'fail', 'partial'] as r}
-								<button class="px-1.5 py-0.5 text-xs rounded transition {newFormData.result === r ? (resultMap[r]?.c || '') : INACTIVE}" onclick={() => { newFormData.result = r; }}>{resultMap[r].l}</button>
-							{/each}
-						</div>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="遗留问题" rows="2" bind:value={newFormData.remainingIssues}></textarea>
+						<PMFormInput label="" placeholder="验收项" bind:value={newTitle} oninput={() => { newFormData.title = newTitle; }} />
+						<PMFormTextarea label="" placeholder="验收范围" rows="2" bind:value={newFormData.scope} />
+						<PMFormTextarea label="" placeholder="通过项（每行一个）" rows="2" bind:value={newFormData.passedItems} />
+						<PMFormToggleGroup
+							label="结果："
+							options={[
+								{ value: 'pass', label: '通过', color: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' },
+								{ value: 'fail', label: '未通过', color: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' },
+								{ value: 'partial', label: '部分通过', color: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' }
+							]}
+							bind:selected={newFormData.result}
+						/>
+						<PMFormTextarea label="" placeholder="遗留问题" rows="2" bind:value={newFormData.remainingIssues} />
 					{:else if moduleType === 'requirement-boundary'}
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="场景" bind:value={newTitle} />
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 resize-none" placeholder="功能" rows="2" bind:value={newFormData.function}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="使用方式" rows="2" bind:value={newFormData.usage}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="预期效果" rows="2" bind:value={newFormData.expectedEffect}></textarea>
+						<PMFormInput label="" placeholder="场景" bind:value={newTitle} />
+						<PMFormTextarea label="" placeholder="功能" rows="2" bind:value={newFormData.function} />
+						<PMFormTextarea label="" placeholder="使用方式" rows="2" bind:value={newFormData.usage} />
+						<PMFormTextarea label="" placeholder="预期效果" rows="2" bind:value={newFormData.expectedEffect} />
 						<div class="flex gap-2">
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFormData.relatedRequirements}>
-								<option value="">关联需求（可选）</option>
-								{#each requirementEntries as req (req.id)}
-									<option value={req.id}>{req.title}</option>
-								{/each}
-							</select>
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFormData.relatedParameters}>
-								<option value="">关联参数（可选）</option>
-								{#each parameterEntries as param (param.id)}
-									<option value={param.id}>{param.title}</option>
-								{/each}
-							</select>
+							<PMFormSelect
+								placeholder="关联需求（可选）"
+								options={requirementEntries.map((req: any) => ({ value: req.id, label: req.title }))}
+								bind:value={newFormData.relatedRequirements}
+								class="flex-1"
+							/>
+							<PMFormSelect
+								placeholder="关联参数（可选）"
+								options={parameterEntries.map((param: any) => ({ value: param.id, label: param.title }))}
+								bind:value={newFormData.relatedParameters}
+								class="flex-1"
+							/>
 						</div>
 					{:else}
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder={moduleType === 'roadmap' ? '节点名称' : '标题'} bind:value={newTitle} onkeydown={(e) => { if (e.key === 'Enter' && newTitle.trim()) handleCreate(); }} />
+						<PMFormInput label="" placeholder={moduleType === 'roadmap' ? '节点名称' : '标题'} bind:value={newTitle} onkeydown={(e) => { if (e.key === 'Enter' && newTitle.trim()) handleCreate(); }} />
 						{#if isRichView || moduleType === 'meeting'}
-							<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 resize-none" placeholder="内容（可选）" rows="2" bind:value={newContent}></textarea>
+							<PMFormTextarea label="" placeholder="内容（可选）" rows="2" bind:value={newContent} />
 						{/if}
 						{#if moduleType === 'meeting'}
-							<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="参会人员（逗号分隔）" bind:value={newFormData.participants} />
-							<input type="datetime-local" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFormData.meetingDate} />
-							<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="会议结论" rows="2" bind:value={newFormData.conclusions}></textarea>
-							<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="待办事项（每行一个）" rows="2" bind:value={newFormData.actionItems}></textarea>
+							<PMFormInput label="" placeholder="参会人员（逗号分隔）" bind:value={newFormData.participants} />
+							<PMFormInput label="" type="datetime-local" bind:value={newFormData.meetingDate} />
+							<PMFormTextarea label="" placeholder="会议结论" rows="2" bind:value={newFormData.conclusions} />
+							<PMFormTextarea label="" placeholder="待办事项（每行一个）" rows="2" bind:value={newFormData.actionItems} />
 						{/if}
 						{#if moduleType !== 'roadmap'}
-							<div class="flex items-center gap-2">
-								<span class="text-xs text-gray-500">优先级：</span>
-								{#each ['p0','p1','p2','p3'] as p}
-									<button class="px-1.5 py-0.5 text-xs rounded transition {prioBtnCls(p)}" onclick={() => { newPriority = p as Priority; }}>{prioMap[p].l}</button>
-								{/each}
-							</div>
+							<PMFormToggleGroup
+								label="优先级："
+								options={[
+									{ value: 'p0', label: 'P0', color: prioMap.p0.c },
+									{ value: 'p1', label: 'P1', color: prioMap.p1.c },
+									{ value: 'p2', label: 'P2', color: prioMap.p2.c },
+									{ value: 'p3', label: 'P3', color: prioMap.p3.c }
+								]}
+								bind:selected={newPriority}
+							/>
 						{/if}
 					{/if}
 					{#if moduleType === 'parameter'}
 						<div class="flex items-center gap-2">
-							<input type="text" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="参数 Key" bind:value={newParamKey} />
-							<div class="flex items-center gap-1">
-								{#each ['input', 'output', 'config'] as pt}
-									<button class="px-1.5 py-0.5 text-xs rounded transition {ptBtnCls(pt)}" onclick={() => { newParamType = pt as any; }}>{paramTypeMap[pt].l}</button>
-								{/each}
-							</div>
+							<PMFormInput label="" placeholder="参数 Key" class="flex-1" bind:value={newParamKey} />
+							<PMFormToggleGroup
+								options={[
+									{ value: 'input', label: '输入', color: paramTypeMap.input.c },
+									{ value: 'output', label: '输出', color: paramTypeMap.output.c },
+									{ value: 'config', label: '配置', color: paramTypeMap.config.c }
+								]}
+								bind:selected={newParamType}
+							/>
 						</div>
 						<div class="flex items-center gap-2">
-							<select class="text-sm px-2 py-1 bg-gray-50 dark:bg-gray-850 border-0 rounded-lg outline-hidden" bind:value={newDataType}>
-								{#each ['string', 'number', 'boolean', 'object', 'array'] as dt}<option value={dt}>{dt}</option>{/each}
-							</select>
-							<input type="text" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="默认值" bind:value={newDefaultValue} />
+							<PMFormSelect
+								options={['string', 'number', 'boolean', 'object', 'array'].map((dt) => ({ value: dt, label: dt }))}
+								bind:value={newDataType}
+							/>
+							<PMFormInput label="" placeholder="默认值" class="flex-1" bind:value={newDefaultValue} />
 						</div>
 						<div class="flex items-center gap-2">
 							<label class="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" bind:checked={newParamRequired} /> 必填</label>
-							<input type="text" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="描述" bind:value={newParamDescription} />
+							<PMFormInput label="" placeholder="描述" class="flex-1" bind:value={newParamDescription} />
 						</div>
 						<div class="flex gap-2">
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newSourceDocument}>
-								<option value="">来源文档（可选）</option>
-								{#each prdEntries as prd (prd.id)}
-									<option value={prd.title}>{prd.title}</option>
-								{/each}
-								<option value="__manual">手动输入...</option>
-							</select>
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newModuleName}>
-								<option value="">选择模块</option>
-								{#each moduleOptions as mo}
-									<option value={mo}>{mo}</option>
-								{/each}
-							</select>
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFeatureName} disabled={!newModuleName}>
-								<option value="">选择功能</option>
-								{#each featureOptionsForModule as fo}
-									<option value={fo}>{fo}</option>
-								{/each}
-							</select>
+							<PMFormSelect
+								placeholder="来源文档（可选）"
+								options={[...prdEntries.map((prd: any) => ({ value: prd.title, label: prd.title })), { value: '__manual', label: '手动输入...' }]}
+								bind:value={newSourceDocument}
+								class="flex-1"
+							/>
+							<PMFormSelect
+								placeholder="选择模块"
+								options={moduleOptions.map((mo: string) => ({ value: mo, label: mo }))}
+								bind:value={newModuleName}
+								class="flex-1"
+							/>
+							<PMFormSelect
+								placeholder="选择功能"
+								options={featureOptionsForModule.map((fo: string) => ({ value: fo, label: fo }))}
+								bind:value={newFeatureName}
+								class="flex-1"
+								disabled={!newModuleName}
+							/>
 						</div>
 					{:else if moduleType === 'testcase'}
-						<div class="flex items-center gap-1">
-							<span class="text-xs text-gray-500">用例类型：</span>
-							{#each ['functional', 'boundary', 'exception', 'performance'] as ct}
-								<button class="px-1.5 py-0.5 text-xs rounded transition {ctBtnCls(ct)}" onclick={() => { newCaseType = ct as any; }}>{caseTypeMap[ct].l}</button>
-							{/each}
-						</div>
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="测试场景" bind:value={newScenario} />
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="前置条件" rows="2" bind:value={newPrecondition}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="测试步骤" rows="3" bind:value={newSteps}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="输入数据" rows="2" bind:value={newInputData}></textarea>
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="预期结果" rows="2" bind:value={newExpectedResult}></textarea>
+						<PMFormToggleGroup
+							label="用例类型："
+							options={[
+								{ value: 'functional', label: '功能', color: caseTypeMap.functional.c },
+								{ value: 'boundary', label: '边界', color: caseTypeMap.boundary.c },
+								{ value: 'exception', label: '异常', color: caseTypeMap.exception.c },
+								{ value: 'performance', label: '性能', color: caseTypeMap.performance.c }
+							]}
+							bind:selected={newCaseType}
+						/>
+						<PMFormInput label="" placeholder="测试场景" bind:value={newScenario} />
+						<PMFormTextarea label="" placeholder="前置条件" rows="2" bind:value={newPrecondition} />
+						<PMFormTextarea label="" placeholder="测试步骤" rows="3" bind:value={newSteps} />
+						<PMFormTextarea label="" placeholder="输入数据" rows="2" bind:value={newInputData} />
+						<PMFormTextarea label="" placeholder="预期结果" rows="2" bind:value={newExpectedResult} />
 						<div class="flex gap-2">
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newRequirementId}>
-								<option value="">关联需求（可选）</option>
-								{#each requirementEntries as req (req.id)}
-									<option value={req.id}>[{prioMap[req.priority]?.l || 'P2'}] {req.title} ({req.id.slice(0, 6)})</option>
-								{/each}
-							</select>
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newParameterId}>
-								<option value="">关联参数（可选）</option>
-								{#each parameterEntries as param (param.id)}
-									<option value={param.id}>{param.title} ({param.id.slice(0, 6)})</option>
-								{/each}
-							</select>
+							<PMFormSelect
+								placeholder="关联需求（可选）"
+								options={requirementEntries.map((req: any) => ({ value: req.id, label: `[${prioMap[req.priority]?.l || 'P2'}] ${req.title} (${req.id.slice(0, 6)})` }))}
+								bind:value={newRequirementId}
+								class="flex-1"
+							/>
+							<PMFormSelect
+								placeholder="关联参数（可选）"
+								options={parameterEntries.map((param: any) => ({ value: param.id, label: `${param.title} (${param.id.slice(0, 6)})` }))}
+								bind:value={newParameterId}
+								class="flex-1"
+							/>
 						</div>
-						<div class="flex gap-2">
-							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFeatureName}>
-								<option value="">关联功能（可选）</option>
-								{#each featureOptions as fo}
-									<option value={fo}>{fo}</option>
-								{/each}
-							</select>
-						</div>
+						<PMFormSelect
+							placeholder="关联功能（可选）"
+							options={featureOptions.map((fo: string) => ({ value: fo, label: fo }))}
+							bind:value={newFeatureName}
+						/>
 					{:else if moduleType === 'requirement'}
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="需求描述" rows="2" bind:value={newDescription}></textarea>
+						<PMFormTextarea label="" placeholder="需求描述" rows="2" bind:value={newDescription} />
 						<div class="flex items-center gap-2">
-							<div class="flex items-center gap-1">
-								<span class="text-xs text-gray-500">来源：</span>
-								{#each ['manual', 'excel', 'agent'] as s}
-									<button class="px-1.5 py-0.5 text-xs rounded transition {srcBtnCls(s)}" onclick={() => { newSource = s as any; }}>{sourceMap[s].l}</button>
-								{/each}
-							</div>
-							<input type="text" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="分类" bind:value={newCategory} />
+							<PMFormToggleGroup
+								label="来源："
+								options={[
+									{ value: 'manual', label: '手动', color: sourceMap.manual.c },
+									{ value: 'excel', label: 'Excel', color: sourceMap.excel.c },
+									{ value: 'agent', label: 'AI', color: sourceMap.agent.c }
+								]}
+								bind:selected={newSource}
+							/>
+							<PMFormInput label="" placeholder="分类" class="flex-1" bind:value={newCategory} />
 						</div>
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="标签（逗号分隔）" bind:value={newTags} />
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="用户角色" bind:value={newUserRole} />
-						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="预期收益" rows="2" bind:value={newExpectedBenefit}></textarea>
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="关联模块（逗号分隔）" bind:value={newRelatedModules} />
+						<PMFormInput label="" placeholder="标签（逗号分隔）" bind:value={newTags} />
+						<PMFormInput label="" placeholder="用户角色" bind:value={newUserRole} />
+						<PMFormTextarea label="" placeholder="预期收益" rows="2" bind:value={newExpectedBenefit} />
+						<PMFormInput label="" placeholder="关联模块（逗号分隔）" bind:value={newRelatedModules} />
 					{:else if moduleType === 'roadmap'}
 						<div class="flex gap-2">
-							<select class="text-sm px-2 py-1 bg-gray-50 dark:bg-gray-850 border-0 rounded-lg outline-hidden" bind:value={newNodeType}>
-								{#each ['milestone', 'feature', 'release'] as nt}<option value={nt}>{nodeTypeMap[nt].l}</option>{/each}
-							</select>
-							<select class="text-sm px-2 py-1 bg-gray-50 dark:bg-gray-850 border-0 rounded-lg outline-hidden" bind:value={newNodeStatus}>
-								{#each ['planned', 'in_progress', 'completed', 'delayed'] as ns}<option value={ns}>{nodeStatusMap[ns].l}</option>{/each}
-							</select>
+							<PMFormSelect
+								options={['milestone', 'feature', 'release'].map((nt) => ({ value: nt, label: nodeTypeMap[nt].l }))}
+								bind:value={newNodeType}
+							/>
+							<PMFormSelect
+								options={['planned', 'in_progress', 'completed', 'delayed'].map((ns) => ({ value: ns, label: nodeStatusMap[ns].l }))}
+								bind:value={newNodeStatus}
+							/>
 						</div>
 						<div class="flex gap-2">
-							<input type="date" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newStartDate} />
-							<input type="date" class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newEndDate} />
+							<PMFormInput label="" type="date" class="flex-1" bind:value={newStartDate} />
+							<PMFormInput label="" type="date" class="flex-1" bind:value={newEndDate} />
 						</div>
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="依赖节点ID（逗号分隔）" bind:value={newDependencies} />
-						<select class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newVersionId}>
-							<option value="">版本（可选）</option>
-							{#each $versionList as v (v.id)}
-								<option value={v.id}>{v.versionNumber || v.version_number || 'v?'}</option>
-							{/each}
-						</select>
+						<PMFormInput label="" placeholder="依赖节点ID（逗号分隔）" bind:value={newDependencies} />
+						<PMFormSelect
+							placeholder="版本（可选）"
+							options={$versionList.map((v: any) => ({ value: v.id, label: v.versionNumber || v.version_number || 'v?' }))}
+							bind:value={newVersionId}
+						/>
 					{/if}
 					<div class="flex justify-end gap-2">
 						<button class="px-3 py-1.5 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition" onclick={resetForm}>取消</button>
@@ -1521,7 +1548,7 @@
 					{/each}</tbody>
 				</table>
 			</div>
-	{:else if isFormView || isMindmapView}
+	{:else if isFormView || isMindmapView || isFlowchartView}
 		{#if moduleType === 'product-architecture'}
 			<!-- View toggle for product architecture -->
 			<div class="px-3.5 py-1 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800">
@@ -1532,67 +1559,92 @@
 				</div>
 			</div>
 			{#if archView === 'mindmap'}
-				<div class="h-[600px]">
-					<PMMindMap
-									nodes={(() => {
-											const allNodes: MindMapNode[] = [];
-											for (const entry of filteredEntries) {
-												const nodes = (entry.data || entry.metadata || {}).nodes || [];
-												allNodes.push(...nodes);
-											}
-											// If no nodes found, create a default root node
-											if (allNodes.length === 0) {
-												allNodes.push({
-													id: 'root',
-													label: '产品架构',
-													type: 'root',
-													position: { x: 0, y: 0 },
-													parentId: null,
-													metadata: {},
-													projectId: '',
-													moduleRef: null,
-													createdAt: Date.now(),
-													updatedAt: Date.now()
-												});
-											}
-											return allNodes;
-										})() as MindMapNode[]}
-						onChange={async (updatedNodes: MindMapNode[]) => {
-							// Map nodes back to their source entries by matching node IDs
-							const nodeToEntry = new Map<string, string>();
-							for (const entry of filteredEntries) {
-								const entryNodes: MindMapNode[] = (entry.data || entry.metadata || {}).nodes || [];
-								for (const n of entryNodes) {
-									nodeToEntry.set(n.id, entry.id);
+		{#if loadRelatedError}
+			<div class="px-3.5 py-2 flex items-center gap-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-100 dark:border-yellow-900/30">
+				<svg class="w-4 h-4 text-yellow-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+				<span class="text-xs text-yellow-600 dark:text-yellow-400">部分关联数据加载失败：{loadRelatedError}</span>
+				<button class="text-xs text-yellow-600 dark:text-yellow-400 underline ml-1" onclick={loadRelatedEntries}>重试</button>
+			</div>
+		{/if}
+
+		{#if loadError}
+					<div class="py-12 text-center">
+						<svg class="w-10 h-10 mx-auto text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+						<p class="text-sm text-red-500 dark:text-red-400">加载架构数据失败：{loadError}</p>
+						<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={loadEntries}>重试</button>
+					</div>
+				{:else if filteredEntries.length === 0}
+					<div class="py-12 text-center">
+						<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg>
+						<p class="text-sm text-gray-500 dark:text-gray-400">还没有产品架构条目</p>
+						<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">创建一个架构条目后，可以在思维导图中编辑节点</p>
+						{#if !showNewForm}
+							<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个架构条目</button>
+						{/if}
+					</div>
+				{:else}
+					<div class="h-[600px]">
+						<PMMindMap
+										nodes={(() => {
+												const allNodes: MindMapNode[] = [];
+												for (const entry of filteredEntries) {
+													const nodes = (entry.data || entry.metadata || {}).nodes || [];
+													allNodes.push(...nodes);
+												}
+												// If no nodes found, create a default root node
+												if (allNodes.length === 0) {
+													allNodes.push({
+														id: 'root',
+														label: '产品架构',
+														type: 'root',
+														position: { x: 0, y: 0 },
+														parentId: null,
+														metadata: {},
+														projectId: '',
+														moduleRef: null,
+														createdAt: Date.now(),
+														updatedAt: Date.now()
+													});
+												}
+												return allNodes;
+											})() as MindMapNode[]}
+							onChange={async (updatedNodes: MindMapNode[]) => {
+								// Map nodes back to their source entries by matching node IDs
+								const nodeToEntry = new Map<string, string>();
+								for (const entry of filteredEntries) {
+									const entryNodes: MindMapNode[] = (entry.data || entry.metadata || {}).nodes || [];
+									for (const n of entryNodes) {
+										nodeToEntry.set(n.id, entry.id);
+									}
 								}
-							}
-							// Group updated nodes by entry
-							const entryNodesMap = new Map<string, MindMapNode[]>();
-							for (const node of updatedNodes) {
-								const eid = nodeToEntry.get(node.id);
-								if (eid) {
-									if (!entryNodesMap.has(eid)) entryNodesMap.set(eid, []);
-									entryNodesMap.get(eid)!.push(node);
+								// Group updated nodes by entry
+								const entryNodesMap = new Map<string, MindMapNode[]>();
+								for (const node of updatedNodes) {
+									const eid = nodeToEntry.get(node.id);
+									if (eid) {
+										if (!entryNodesMap.has(eid)) entryNodesMap.set(eid, []);
+										entryNodesMap.get(eid)!.push(node);
+									}
 								}
-							}
-							// Update each entry's nodes
-							const token = localStorage.token || '';
-							for (const [entryId, nodes] of entryNodesMap) {
-								const entry = filteredEntries.find(e => e.id === entryId);
-								if (!entry) continue;
-								const d = { ...(entry.data || entry.metadata || {}) };
-								d.nodes = nodes;
-								try {
-									await updateEntry(token, entryId, { data: d });
-								} catch (e: any) {
-									console.warn('[MindMap] save failed for entry', entryId, e?.message);
+								// Update each entry's nodes
+								const token = localStorage.token || '';
+								for (const [entryId, nodes] of entryNodesMap) {
+									const entry = filteredEntries.find(e => e.id === entryId);
+									if (!entry) continue;
+									const d = { ...(entry.data || entry.metadata || {}) };
+									d.nodes = nodes;
+									try {
+										await updateEntry(token, entryId, { data: d });
+									} catch (e: any) {
+										console.warn('[MindMap] save failed for entry', entryId, e?.message);
+									}
 								}
-							}
-							await loadEntries();
-						}}
-						readonly={false}
-					/>
-				</div>
+								await loadEntries();
+							}}
+							readonly={false}
+						/>
+					</div>
+				{/if}
 			{:else}
 				<div class="px-2.5 py-1 gap-1.5 flex flex-col">{#each filteredEntries as entry (entry.id)}
 					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -1624,6 +1676,49 @@
 					</div>
 				{/each}</div>
 			{/if}
+	{:else if moduleType === 'flowchart'}
+		{#if loadError}
+			<div class="py-12 text-center">
+				<svg class="w-10 h-10 mx-auto text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+				<p class="text-sm text-red-500 dark:text-red-400">加载流程图数据失败：{loadError}</p>
+				<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={loadEntries}>重试</button>
+			</div>
+		{:else if filteredEntries.length === 0}
+			<div class="py-12 text-center">
+				<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+				<p class="text-sm text-gray-500 dark:text-gray-400">还没有流程图条目</p>
+				<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">创建一个流程图后，可以在编辑器中设计节点和连线</p>
+				{#if !showNewForm}
+					<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个流程图</button>
+				{/if}
+			</div>
+		{:else}
+			<div class="px-2.5 py-1 gap-1.5 flex flex-col">{#each filteredEntries as entry (entry.id)}
+				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+				<div class="flex cursor-pointer w-full px-3.5 py-2 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition group" role="button" tabindex="0" onclick={() => openEntryEditor(entry.id)} onkeydown={(e) => { if (e.key === 'Enter') openEntryEditor(entry.id); }}>
+					<div class="w-full flex flex-col justify-between"><div class="flex-1">
+						<div class="flex items-center gap-2 self-center justify-between">
+							<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{entry.title}</div>
+							<div class="flex shrink-0 items-center text-xs gap-2">
+								{#if entry.priority}<span class="px-1.5 py-0.5 rounded text-xs {prioMap[entry.priority]?.c || ''}">{prioMap[entry.priority]?.l || ''}</span>{/if}
+								<span class="px-1.5 py-0.5 rounded text-xs {statusMap[entry.status]?.c || statusMap.draft.c}">{statusMap[entry.status]?.l || '草稿'}</span>
+								<span class="text-gray-500">{formatTime(entry.updated_at || entry.updatedAt)}</span>
+								<button class="p-1 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition opacity-0 group-hover:opacity-100" title="溯源" onclick={(e) => { e.stopPropagation(); openTracePanel(entry); }}><svg class="size-3.5 text-gray-400 hover:text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.813a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364l1.757 1.757" /></svg></button>
+								<button class="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition opacity-0 group-hover:opacity-100" title="删除" onclick={(e) => { e.stopPropagation(); handleDelete(entry.id); }}><svg class="size-3.5 text-gray-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
+							</div>
+						</div>
+						<div class="text-xs text-gray-400 mt-1">
+							{#if (entry.data || entry.metadata || {}).flowchart}
+								{@const fc = (entry.data || entry.metadata || {}).flowchart}
+								🔀 {(fc.nodes || []).length} 个节点 · {(fc.edges || []).length} 条连线
+							{:else}
+								🔀 空流程图
+							{/if}
+						</div>
+					</div></div>
+				</div>
+			{/each}</div>
+		{/if}
 	{/if}
 	{:else}
 		<div class="px-2.5 py-1 gap-1.5 flex flex-col">{#each filteredEntries as entry (entry.id)}
