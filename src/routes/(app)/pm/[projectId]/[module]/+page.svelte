@@ -582,8 +582,6 @@
 	// Rich-text entry editor
 	let editingEntryId = $state<string | null>(null);
 	let editingEntry = $state<any>(null);
-	let editingSections = $state<PRDSection[]>([]);
-	let editingActiveSection = $state<string>('');
 	let editingDocTitle = $state('');
 	let editingDocStatus = $state<ModuleStatus>('draft');
 	let editingContentHtml = $state('');
@@ -596,15 +594,6 @@
 	let saveStatus = $state<'saved' | 'unsaved' | 'auto-saving'>('saved');
 	let lastAutoSaveTime = $state<number>(0);
 	let showSaveVersionDialog = $state(false);
-	const defaultSections: PRDSection[] = [
-		{ id: '1', type: 'overview', title: '概述', content: '', parameters: [], order: 0 },
-		{ id: '2', type: 'background', title: '背景', content: '', parameters: [], order: 1 },
-		{ id: '3', type: 'goal', title: '目标', content: '', parameters: [], order: 2 },
-		{ id: '4', type: 'requirement', title: '需求', content: '', parameters: [], order: 3 },
-		{ id: '5', type: 'non_functional', title: '非功能需求', content: '', parameters: [], order: 4 },
-		{ id: '6', type: 'appendix', title: '附录', content: '', parameters: [], order: 5 }
-	];
-	const sectionTypeLabels: Record<string, string> = { overview: '概述', background: '背景', goal: '目标', requirement: '需求', non_functional: '非功能', appendix: '附录' };
 
 	async function openEntryEditor(entryId: string) {
 		try {
@@ -624,26 +613,18 @@
 			}
 
 			if (moduleType === 'prd') {
-				const data = editingEntry.data || editingEntry.metadata || {};
-				editingSections = data.sections?.length ? data.sections : [...defaultSections];
-				editingActiveSection = editingSections[0]?.id || '';
-				// Load the active section content into the rich editor
-				const sec = editingSections.find(s => s.id === editingActiveSection);
-				editingContentHtml = sec?.content || '';
+				// PRD now uses direct content, no sections
+				editingContentHtml = editingEntry.content || '';
 				editingContentMd = '';
 				editingContentJson = '';
 			} else if (isFormView || isMindmapView) {
 				editingContentHtml = editingEntry.content || '';
 				editingContentMd = '';
 				editingContentJson = '';
-				editingSections = [];
-				editingActiveSection = '';
 			} else {
 				editingContentHtml = editingEntry.content || '';
 				editingContentMd = '';
 				editingContentJson = '';
-				editingSections = [];
-				editingActiveSection = '';
 			}
 			editingEntryId = entryId;
 		} catch (e: any) {
@@ -654,8 +635,6 @@
 	function closeEntryEditor() {
 		editingEntryId = null;
 		editingEntry = null;
-		editingSections = [];
-		editingActiveSection = '';
 		editingContentHtml = '';
 		editingContentMd = '';
 		editingContentJson = '';
@@ -683,16 +662,11 @@
 		try {
 			const token = localStorage.token || '';
 			if (moduleType === 'prd') {
-				const idx = editingSections.findIndex(s => s.id === editingActiveSection);
-				if (idx >= 0) {
-					editingSections[idx] = { ...editingSections[idx], content: editingContentMd || editingContentHtml };
-					editingSections = [...editingSections];
-				}
 				const autoPrdVid = editingVersionId || editingEntry?.data?.versionId || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle, status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: { sections: editingSections, versionId: autoPrdVid },
+					data: { versionId: autoPrdVid },
 					versionId: autoPrdVid
 				});
 			} else {
@@ -716,18 +690,8 @@
 	}
 
 	function switchPrdSection(sectionId: string) {
-		// Save current section
-		const idx = editingSections.findIndex(s => s.id === editingActiveSection);
-		if (idx >= 0) {
-			editingSections[idx] = { ...editingSections[idx], content: editingContentMd || editingContentHtml };
-			editingSections = [...editingSections];
-		}
-		// Load new section
-		editingActiveSection = sectionId;
-		const sec = editingSections.find(s => s.id === sectionId);
-		editingContentHtml = sec?.content || '';
-		editingContentMd = '';
-		editingContentJson = '';
+		// Deprecated: PRD no longer uses sections
+		console.warn('switchPrdSection is deprecated, PRD no longer uses sections');
 	}
 
 	// PRD MD import
@@ -776,18 +740,12 @@
 		try {
 			const token = localStorage.token || '';
 			if (moduleType === 'prd') {
-				// Save the current section content back
-				const idx = editingSections.findIndex(s => s.id === editingActiveSection);
-				if (idx >= 0) {
-					editingSections[idx] = { ...editingSections[idx], content: editingContentMd || editingContentHtml };
-					editingSections = [...editingSections];
-				}
 				const prdVersionId = editingVersionId || $currentVersion?.id || '';
 				await updateEntry(token, editingEntryId, {
 					title: editingDocTitle,
 					status: editingDocStatus,
 					content: editingContentMd || editingContentHtml,
-					data: { sections: editingSections, versionId: prdVersionId },
+					data: { versionId: prdVersionId },
 					versionId: prdVersionId
 				});
 			} else if (isFormView && editingEntry) {
@@ -1418,9 +1376,9 @@
 		{:else if isTableView}
 			<div class="overflow-x-auto">
 				<table class="w-full text-sm">
-					<thead><tr class="border-b border-gray-100 dark:border-gray-800">
-						{#if config.tableColumns}{#each config.tableColumns as col (col.key)}<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase {col.width || ''}">{col.label}</th>{/each}{/if}
-						<th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">操作</th>
+					<thead class="bg-gray-50 dark:bg-gray-850"><tr class="border-b border-gray-200 dark:border-gray-700">
+						{#if config.tableColumns}{#each config.tableColumns as col (col.key)}<th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider {col.width || ''}">{col.label}</th>{/each}{/if}
+						<th class="px-4 py-2.5 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider w-24">操作</th>
 					</tr></thead>
 					<tbody>{#each pagedEntries as entry (entry.id)}
 						<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850 transition">
@@ -1573,17 +1531,32 @@
 					<button class="px-2 py-1 text-xs rounded-md transition {archView === 'mindmap' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { archView = 'mindmap'; }}>思维导图</button>
 				</div>
 			</div>
-			{#if archView === 'mindmap' && filteredEntries.length > 0}
+			{#if archView === 'mindmap'}
 				<div class="h-[600px]">
 					<PMMindMap
-						nodes={(() => {
-							const allNodes: MindMapNode[] = [];
-							for (const entry of filteredEntries) {
-								const nodes = (entry.data || entry.metadata || {}).nodes || [];
-								allNodes.push(...nodes);
-							}
-							return allNodes;
-						})() as MindMapNode[]}
+									nodes={(() => {
+											const allNodes: MindMapNode[] = [];
+											for (const entry of filteredEntries) {
+												const nodes = (entry.data || entry.metadata || {}).nodes || [];
+												allNodes.push(...nodes);
+											}
+											// If no nodes found, create a default root node
+											if (allNodes.length === 0) {
+												allNodes.push({
+													id: 'root',
+													label: '产品架构',
+													type: 'root',
+													position: { x: 0, y: 0 },
+													parentId: null,
+													metadata: {},
+													projectId: '',
+													moduleRef: null,
+													createdAt: Date.now(),
+													updatedAt: Date.now()
+												});
+											}
+											return allNodes;
+										})() as MindMapNode[]}
 						onChange={async (updatedNodes: MindMapNode[]) => {
 							// Map nodes back to their source entries by matching node IDs
 							const nodeToEntry = new Map<string, string>();
@@ -1643,7 +1616,10 @@
 									<button class="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition opacity-0 group-hover:opacity-100" title="删除" onclick={(e) => { e.stopPropagation(); handleDelete(entry.id); }}><svg class="size-3.5 text-gray-400 hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
 								</div>
 							</div>
-							<div class="text-xs text-gray-400 mt-1">🗺️ {(getEntryData(entry, 'nodes') || []).length || 0} 个节点</div>
+								<div class="text-xs text-gray-400 mt-1">🗺️ {(getEntryData(entry, 'nodes') || []).length || 0} 个节点</div>
+								{#if getEntryData(entry, 'description')}
+									<div class="text-[10px] text-gray-500 mt-1 line-clamp-1">{getEntryData(entry, 'description')}</div>
+								{/if}
 						</div></div>
 					</div>
 				{/each}</div>
@@ -1675,10 +1651,17 @@
 						{#if moduleType === 'faq'}
 							<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-1">{getEntryData(entry, 'answer') || ''}</div>
 						{:else if moduleType === 'risk'}
-							<div class="flex gap-2 mt-1">
-								{#if getEntryData(entry, 'probability')}<span class="px-1 py-0.5 rounded text-[10px] {probMap[getEntryData(entry, 'probability')]?.c || ''}">概率:{probMap[getEntryData(entry, 'probability')]?.l || getEntryData(entry, 'probability')}</span>{/if}
+							<div class="flex gap-2 mt-1 flex-wrap">
+								{#if getEntryData(entry, 'probability')}<span class="px-1.5 py-0.5 rounded text-[10px] {probMap[getEntryData(entry, 'probability')]?.c || ''}">概率:{probMap[getEntryData(entry, 'probability')]?.l || getEntryData(entry, 'probability')}</span>{/if}
 								{#if getEntryData(entry, 'impactScope')}<span class="text-[10px] text-gray-500">影响:{getEntryData(entry, 'impactScope')}</span>{/if}
 							</div>
+							{#if getEntryData(entry, 'measures')}<div class="text-[10px] text-gray-500 mt-1 line-clamp-1">应对措施:{getEntryData(entry, 'measures')}</div>{/if}
+						{:else if moduleType === 'acceptance'}
+							<div class="flex gap-2 mt-1 flex-wrap">
+								{#if getEntryData(entry, 'result')}<span class="px-1.5 py-0.5 rounded text-[10px] {resultMap[getEntryData(entry, 'result')]?.c || ''}">{resultMap[getEntryData(entry, 'result')]?.l || getEntryData(entry, 'result')}</span>{/if}
+								{#if getEntryData(entry, 'scope')}<span class="text-[10px] text-gray-500">范围:{getEntryData(entry, 'scope')}</span>{/if}
+							</div>
+							{#if getEntryData(entry, 'remainingIssues')}<div class="text-[10px] text-gray-500 mt-1 line-clamp-1">遗留:{getEntryData(entry, 'remainingIssues')}</div>{/if}
 						{:else if moduleType === 'competitor'}
 							<div class="flex gap-2 mt-1 items-center">
 								{#if getEntryData(entry, 'competitorUrl')}<span class="text-[10px] text-blue-500 truncate">{getEntryData(entry, 'competitorUrl')}</span>{/if}
@@ -1791,27 +1774,6 @@
 		<div class="flex flex-1 overflow-hidden">
 			{#if moduleType === 'prd'}
 				<input bind:this={mdFileInput} type="file" accept=".md,.markdown,.txt,.docx,.doc" class="hidden" onchange={onMdFileSelected} />
-				<!-- PRD Section Sidebar -->
-				<div class="w-56 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-850 flex flex-col">
-					<div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-						<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">文档章节</h3>
-					</div>
-					<div class="flex-1 overflow-y-auto p-2 space-y-1">
-						{#each editingSections as section (section.id)}
-							<button
-								class="w-full text-left px-3 py-2 text-sm rounded-lg transition {editingActiveSection === section.id ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-								onclick={() => switchPrdSection(section.id)}
-							>
-								<div class="flex items-center gap-2">
-									<span class="truncate">{section.title}</span>
-									{#if section.content?.trim()}
-										<span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" title="有内容"></span>
-									{/if}
-								</div>
-							</button>
-						{/each}
-					</div>
-				</div>
 			{/if}
 			<div class="flex-1 overflow-y-auto p-6">
 				{#if isFormView && editingEntry}
@@ -2171,19 +2133,18 @@
 								onChange={(html) => {
 									editingContentHtml = html;
 									editingContentMd = html;
-									// Update current section content in editingSections
-									if (moduleType === 'prd' && editingActiveSection) {
-										const idx = editingSections.findIndex(s => s.id === editingActiveSection);
-										if (idx >= 0) {
-											editingSections[idx] = { ...editingSections[idx], content: html };
-											editingSections = [...editingSections];
-										}
-									}
 									saveStatus = 'unsaved';
 									triggerAutoSave();
 								}}
 								placeholder="在此编写内容..."
 								showToc={true}
+								annotations={editingEntry?.data?.annotations || []}
+								onAnnotationsChange={(newAnnotations) => {
+									if (editingEntry) {
+										const updatedData = { ...(editingEntry.data || {}), annotations: newAnnotations };
+										editingEntry = { ...editingEntry, data: updatedData };
+									}
+								}}
 							/>
 						</div>
 						<!-- SPEC: Glossary panel for prototype category -->
