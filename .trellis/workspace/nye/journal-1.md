@@ -106,3 +106,37 @@ Implemented SPEC module per issue #12: ModuleType registration, specTemplates.ts
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Add flowchart module with SvelteFlow editor, custom nodes, and parameter association
+
+**Date**: 2026-07-04
+**Task**: Add flowchart module with SvelteFlow editor, custom nodes, and parameter association
+**Branch**: `main`
+
+### Summary
+
+Two modules completed in this session: 1) SPEC module (commit 471b5ccf7) — templates, glossary panel, category badges, relation linking, template manager, all 10 AC verified. 2) Flowchart module (commit 38134daee) — SvelteFlow editor using Writable stores, DynamicNode with shape/color rendering, CustomEdge with BaseEdge, NodeConfigPanel with parameter selectors, navigation registration, read-only mode. AC5 (parameter bidirectional sync) deferred. Updated component-guidelines.md spec for both modules.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `471b5ccf7` | (see git log) |
+| `38134daee` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
