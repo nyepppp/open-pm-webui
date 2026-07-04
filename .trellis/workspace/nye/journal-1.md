@@ -173,3 +173,36 @@ Fixed flowchart node click bug (replaced non-existent useOnSelectionChange with 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: PM frontend bug fixes and form UI optimization
+
+**Date**: 2026-07-04
+**Task**: PM frontend bug fixes and form UI optimization
+**Branch**: `main`
+
+### Summary
+
+Fixed 4 PM workspace frontend bugs: (1) product-architecture page stuck loading - added empty/error states with CTA, (2) flowchart page click not responding - added isFlowchartView to rendering conditions, (3) blank pages - surface loadRelatedError with warning banner, (4) form UI ugly - extracted 5 reusable form components (PMFormInput, PMFormTextarea, PMFormSelect, PMFormSection, PMFormToggleGroup). Updated frontend spec with module page patterns, editorType gotcha, empty state pattern, API error surfacing convention, and form component docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ae189073` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
