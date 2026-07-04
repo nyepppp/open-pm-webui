@@ -29,8 +29,6 @@
 	let { flowchartData, onChange, readonly = false, parameterEntries = [] }: Props = $props();
 
 	// Custom node types — must be stable (declared outside render cycle)
-	// Use `as any` for nodeTypes/edgeTypes to bypass Svelte 5 Component vs Svelte 4 class mismatch
-	// This is a known @xyflow/svelte@0.1.x incompatibility with Svelte 5 component types
 	const nodeTypes: NodeTypes = {
 		start: DynamicNode as any,
 		process: DynamicNode as any,
@@ -45,47 +43,80 @@
 		custom: CustomEdge as any
 	};
 
-	// SvelteFlow 0.1.x uses Writable stores for nodes/edges
-	let nodesStore = writable<Node[]>(
-		(flowchartData.nodes || []).map((n: any) => ({
+	// Convert FlowchartData nodes/edges to @xyflow/svelte Node/Edge format
+	function toXyNodes(nodes: FlowchartData['nodes']): Node[] {
+		return (nodes || []).map((n: any) => ({
 			id: n.id,
-			type: n.type,
-			position: n.position,
+			type: n.type || 'process',
+			position: n.position || { x: 0, y: 0 },
 			data: {
-				label: n.data.label,
-				description: n.data.description,
+				label: n.data?.label || '',
+				description: n.data?.description,
 				type: n.type,
-				style: n.data.style,
-				inputParams: n.data.inputParams,
-				outputParams: n.data.outputParams
+				style: n.data?.style,
+				inputParams: n.data?.inputParams || [],
+				outputParams: n.data?.outputParams || []
 			}
-		}))
-	);
-	let edgesStore = writable<Edge[]>(
-		(flowchartData.edges || []).map((e: any) => ({
+		}));
+	}
+
+	function toXyEdges(edges: FlowchartData['edges']): Edge[] {
+		return (edges || []).map((e: any) => ({
 			id: e.id,
 			source: e.source,
 			target: e.target,
 			label: e.label,
 			type: 'custom',
 			data: { style: e.style }
-		}))
-	);
+		}));
+	}
 
-	// Track selected node for config panel
+	// SvelteFlow 0.1.x uses Writable stores
+	// Initialize empty; the $effect below populates from flowchartData on mount and on prop changes
+	let nodesStore = writable<Node[]>([]);
+	let edgesStore = writable<Edge[]>([]);
+
+	// When flowchartData prop changes externally, resync stores
+	// Guard: skip if data is identical to current store content (prevents infinite loop
+	// when onChange → prop change → $effect → set stores → subscribe → emitChange → onChange)
+	let lastSyncedNodesJson = $state('');
+	$effect(() => {
+		const xyNodes = toXyNodes(flowchartData.nodes);
+		const xyEdges = toXyEdges(flowchartData.edges);
+		const json = JSON.stringify(xyNodes.map(n => n.id));
+		if (json !== lastSyncedNodesJson) {
+			lastSyncedNodesJson = json;
+			nodesStore.set(xyNodes);
+			edgesStore.set(xyEdges);
+		}
+	});
+
+	// Track selected node for config panel via on:nodeclick / on:paneclick events
 	let selectedNodeId = $state<string | null>(null);
-	let selectedNode = $state<Node | null>(null);
+	let selectedNodeData = $state<Record<string, unknown> | null>(null);
+
+	function onNodeClick(event: CustomEvent<{ node: Node; event: MouseEvent | TouchEvent }>) {
+		const node = event.detail.node;
+		selectedNodeId = node.id;
+		selectedNodeData = node.data as Record<string, unknown>;
+	}
+
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	function onPaneClick(_event: CustomEvent<{ event: MouseEvent | TouchEvent }>) {
+		selectedNodeId = null;
+		selectedNodeData = null;
+	}
 
 	// Debounce for auto-save
 	let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
 	function emitChange(ns: Node[], es: Edge[]) {
-	 clearTimeout(saveTimer);
+		clearTimeout(saveTimer);
 		saveTimer = setTimeout(() => {
 			const data: FlowchartData = {
 				nodes: ns.map(n => ({
 					id: n.id,
-					type: n.type,
+					type: n.type || 'process',
 					position: n.position,
 					data: {
 						label: (n.data as Record<string, unknown>)?.label as string || '',
@@ -145,20 +176,11 @@
 
 	function deleteSelected() {
 		if (readonly || !selectedNodeId) return;
-		nodesStore.update(ns => ns.filter(n => n.id !== selectedNodeId));
-		edgesStore.update(es => es.filter(e => e.source !== selectedNodeId && e.target !== selectedNodeId));
+		const id = selectedNodeId;
+		nodesStore.update(ns => ns.filter(n => n.id !== id));
+		edgesStore.update(es => es.filter(e => e.source !== id && e.target !== id));
 		selectedNodeId = null;
-		selectedNode = null;
-	}
-
-	function onNodeClick(event: { detail: { node: Node } }) {
-		selectedNodeId = event.detail.node.id;
-		selectedNode = event.detail.node;
-	}
-
-	function onPaneClick() {
-		selectedNodeId = null;
-		selectedNode = null;
+		selectedNodeData = null;
 	}
 
 	function updateNodeData(nodeId: string, data: Record<string, unknown>) {
@@ -167,16 +189,15 @@
 				? { ...n, data: { ...n.data, ...data } }
 				: n
 		));
-		// Update selected node reference
+		// Update selected node data
 		if (selectedNodeId === nodeId) {
 			const updated = currentNodes.find(n => n.id === nodeId);
-			if (updated) selectedNode = updated;
+			if (updated) selectedNodeData = updated.data as Record<string, unknown>;
 		}
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
 		if ((event.key === 'Delete' || event.key === 'Backspace') && selectedNodeId) {
-			// Only delete if not focused in an input
 			const target = event.target as HTMLElement;
 			if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
 			event.preventDefault();
@@ -187,21 +208,20 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="w-full h-full relative">
+<div class="w-full h-full relative" style="min-height: 400px;">
 	<SvelteFlow
 		nodes={nodesStore}
 		edges={edgesStore}
 		{nodeTypes}
 		{edgeTypes}
 		onconnect={onConnect}
-		on:nodeclick={onNodeClick}
-		on:paneclick={onPaneClick}
 		fitView
 		nodesDraggable={!readonly}
 		nodesConnectable={!readonly}
 		elementsSelectable={!readonly}
 		deleteKey={readonly ? null : 'Backspace'}
-		class="bg-gray-50 dark:bg-gray-900"
+		on:nodeclick={onNodeClick}
+		on:paneclick={onPaneClick}
 	>
 		<Background patternColor="#CBD5E1" gap={20} />
 		<Controls />
@@ -227,24 +247,24 @@
 		</Panel>
 	{/if}
 
-	{#if selectedNode && !readonly}
+	{#if selectedNodeId && selectedNodeData && !readonly}
 		{@const fcNode = {
-			id: selectedNode.id,
-			type: selectedNode.type,
-			position: selectedNode.position,
+			id: selectedNodeId,
+			type: (selectedNodeData.type as string) || 'process',
+			position: { x: 0, y: 0 },
 			data: {
-				label: (selectedNode.data as Record<string, unknown>)?.label as string || '',
-				description: (selectedNode.data as Record<string, unknown>)?.description as string | undefined,
-				style: (selectedNode.data as Record<string, unknown>)?.style as Record<string, unknown> | undefined,
-				inputParams: ((selectedNode.data as Record<string, unknown>)?.inputParams as string[]) || [],
-				outputParams: ((selectedNode.data as Record<string, unknown>)?.outputParams as string[]) || []
+				label: (selectedNodeData.label as string) || '',
+				description: selectedNodeData.description as string | undefined,
+				style: selectedNodeData.style as Record<string, unknown> | undefined,
+				inputParams: (selectedNodeData.inputParams as string[]) || [],
+				outputParams: (selectedNodeData.outputParams as string[]) || []
 			}
 		}}
 		<NodeConfigPanel
 			node={fcNode}
 			{parameterEntries}
 			onUpdate={updateNodeData}
-			onClose={() => { selectedNodeId = null; selectedNode = null; }}
+			onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
 		/>
 	{/if}
 </div>

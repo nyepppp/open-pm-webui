@@ -496,3 +496,123 @@ edgesStore.subscribe((es) => { currentEdges = es; emitChange(currentNodes, es); 
 ```
 
 **Why**: Node position changes fire continuously during drag. Without debouncing, every pixel of drag triggers a save cycle. 300ms is a good balance between responsiveness and write amplification.
+
+### Gotcha: SvelteFlow container requires explicit height
+
+`<SvelteFlow>` will not render (blank canvas) if its container has no explicit height. `flex-1` alone is insufficient — the container needs a CSS `min-height` or fixed `height`:
+
+```svelte
+<!-- CORRECT: explicit min-height -->
+<div class="w-full h-full relative" style="min-height: 400px;">
+    <SvelteFlow ... />
+</div>
+
+<!-- WRONG: flex-1 alone may give 0px height -->
+<div class="flex-1">
+    <SvelteFlow ... />
+</div>
+```
+
+**Why**: SvelteFlow uses the container's clientHeight to size its internal canvas. If the container has `height: 0` (common with `flex-1` without a constrained parent), the canvas is invisible.
+
+### Gotcha: Store resync must guard against infinite loops
+
+When `flowchartData` is a prop that updates via `onChange`, and stores are subscribed to emit changes, a circular loop can form:
+
+```
+onChange → prop change → $effect → store.set → subscribe → emitChange → onChange → ...
+```
+
+Guard the `$effect` with a deduplication check:
+
+```typescript
+let lastSyncedNodesJson = $state('');
+$effect(() => {
+    const xyNodes = toXyNodes(flowchartData.nodes);
+    const json = JSON.stringify(xyNodes.map(n => n.id));
+    if (json !== lastSyncedNodesJson) {
+        lastSyncedNodesJson = json;
+        nodesStore.set(xyNodes);
+    }
+});
+```
+
+**Why**: Without the guard, every `onChange` call triggers a prop update, which triggers the `$effect`, which sets stores, which fires subscriptions, which calls `emitChange`, which calls `onChange` again — infinite loop.
+
+### Gotcha: `useOnSelectionChange` does NOT exist in @xyflow/svelte@0.1.39
+
+This hook was added in later versions. For 0.1.x, use the Svelte 4 dispatched events instead:
+
+```svelte
+<!-- CORRECT: use dispatched events for selection tracking -->
+<SvelteFlow
+    on:nodeclick={(event) => { selectedNodeId = event.detail.node.id; }}
+    on:paneclick={() => { selectedNodeId = null; }}
+/>
+```
+
+**Why**: `useOnSelectionChange` is a v1 API. The 0.1.x API only provides `on:nodeclick` and `on:paneclick` dispatched events for tracking node selection.
+
+### Pattern: Parameter↔Flowchart reverse index (derived)
+
+To show which flowchart nodes reference a parameter, use a `$derived.by()` reverse index instead of persisting `flowchartRefs` on parameter entries:
+
+```typescript
+let flowchartEntries = $state<any[]>([]);
+
+interface FlowchartRef {
+    flowchartId: string; flowchartTitle: string;
+    nodeId: string; nodeLabel: string; type: 'input' | 'output';
+}
+
+let paramFlowchartRefs = $derived.by(() => {
+    const map = new Map<string, FlowchartRef[]>();
+    for (const fc of flowchartEntries) {
+        const nodes = (fc.data?.flowchart?.nodes || []) as any[];
+        for (const node of nodes) {
+            for (const pid of (node.data?.inputParams || [])) {
+                const refs = map.get(pid) || [];
+                refs.push({ flowchartId: fc.id, flowchartTitle: fc.title,
+                    nodeId: node.id, nodeLabel: node.data?.label || '', type: 'input' });
+                map.set(pid, refs);
+            }
+            for (const pid of (node.data?.outputParams || [])) {
+                const refs = map.get(pid) || [];
+                refs.push({ flowchartId: fc.id, flowchartTitle: fc.title,
+                    nodeId: node.id, nodeLabel: node.data?.label || '', type: 'output' });
+                map.set(pid, refs);
+            }
+        }
+    }
+    return map;
+});
+```
+
+**Why**: Derived index is always up-to-date with flowchart data. No extra API writes needed. No stale `flowchartRefs` field to sync. Load `flowchartEntries` when parameter module is active via `getEntries(token, projectId, 'flowchart')`.
+
+### Pattern: Parameter delete → flowchart cleanup
+
+When a parameter entry is deleted, clean up all flowchart nodes that reference it:
+
+```typescript
+async function cleanupFlowchartRefsForParam(paramId: string) {
+    const refs = paramFlowchartRefs.get(paramId) || [];
+    const affectedFcIds = [...new Set(refs.map(r => r.flowchartId))];
+    for (const fcId of affectedFcIds) {
+        const fcEntry = flowchartEntries.find(e => e.id === fcId);
+        const fcData = { ...(fcEntry.data || {}) };
+        const flowchart = fcData.flowchart || { nodes: [], edges: [] };
+        flowchart.nodes = (flowchart.nodes || []).map((node: any) => {
+            const inputParams = (node.data?.inputParams || []).filter((id: string) => id !== paramId);
+            const outputParams = (node.data?.outputParams || []).filter((id: string) => id !== paramId);
+            if (inputParams.length === (node.data?.inputParams || []).length &&
+                outputParams.length === (node.data?.outputParams || []).length) return node;
+            return { ...node, data: { ...node.data, inputParams, outputParams } };
+        });
+        fcData.flowchart = flowchart;
+        await updateEntry(token, fcId, { data: fcData });
+    }
+}
+```
+
+Call this before `deleteEntry` in `handleDelete` when `moduleType === 'parameter'`.

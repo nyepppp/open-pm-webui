@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
@@ -52,7 +53,7 @@
 			{ key: 'sourceDocument', label: '来源', width: 'w-20' }, { key: 'moduleName', label: '所属模块', width: 'w-20' },
 			{ key: 'featureName', label: '所属功能', width: 'w-20' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
-			{ key: 'status', label: '状态', width: 'w-16' }
+			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		testcase: { name: '测试用例', editorType: 'table', tableColumns: [
 			{ key: 'priority', label: '优先级', width: 'w-16' }, { key: 'title', label: '用例标题' },
@@ -75,13 +76,14 @@
 			{ key: 'analysis', label: '分析结论', type: 'textarea' }
 		]},
 		roadmap: { name: '产品路线图', editorType: 'table', tableColumns: [
-			{ key: 'title', label: '节点名称' }, { key: 'description', label: '描述', width: 'w-32' },
+			{ key: 'priority', label: '优先级', width: 'w-16' }, { key: 'title', label: '节点名称' },
+			{ key: 'description', label: '描述', width: 'w-32' },
 			{ key: 'nodeType', label: '类型', width: 'w-20' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'nodeStatus', label: '状态', width: 'w-20' },
 			{ key: 'startDate', label: '开始', width: 'w-24' },
 			{ key: 'endDate', label: '结束', width: 'w-24' }, { key: 'dependencies', label: '依赖', width: 'w-24' },
-			{ key: 'updatedAt', label: '更新', width: 'w-24' }
+			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		meeting: { name: '会议纪要', editorType: 'rich' },
 		acceptance: { name: '验收报告', editorType: 'form', formFields: [
@@ -108,13 +110,15 @@
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
-		'requirement-boundary': { name: '需求边界', editorType: 'form', formFields: [
-			{ key: 'scenario', label: '场景', type: 'textarea' },
-			{ key: 'function', label: '功能', type: 'textarea' },
-			{ key: 'usage', label: '使用方式', type: 'textarea' },
-			{ key: 'expectedEffect', label: '预期效果', type: 'textarea' },
-			{ key: 'relatedRequirements', label: '关联需求', type: 'select' },
-			{ key: 'relatedParameters', label: '关联参数', type: 'select' }
+		'requirement-boundary': { name: '需求边界', editorType: 'table', tableColumns: [
+			{ key: 'priority', label: '优先级', width: 'w-16' }, { key: 'title', label: '场景' },
+			{ key: 'function', label: '功能', width: 'w-32' },
+			{ key: 'usage', label: '使用方式', width: 'w-24' },
+			{ key: 'expectedEffect', label: '预期效果', width: 'w-24' },
+			{ key: 'relatedRequirements', label: '关联需求', width: 'w-20' },
+			{ key: 'relatedParameters', label: '关联参数', width: 'w-20' },
+			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
+			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		spec: { name: 'SPEC 规范', editorType: 'rich' },
 		flowchart: { name: '流程图', editorType: 'flowchart' }
@@ -190,6 +194,32 @@
 	let requirementEntries = $state<any[]>([]);
 	let parameterEntries = $state<any[]>([]);
 	let prdEntries = $state<any[]>([]);
+	let flowchartEntries = $state<any[]>([]);
+
+	// Reverse index: paramId → which flowchart nodes reference it
+	// Built from scanning all flowchart entries' nodes for inputParams/outputParams
+	interface FlowchartRef { flowchartId: string; flowchartTitle: string; nodeId: string; nodeLabel: string; type: 'input' | 'output' }
+	let paramFlowchartRefs = $derived.by(() => {
+		const map = new Map<string, FlowchartRef[]>();
+		for (const fc of flowchartEntries) {
+			const nodes = (fc.data?.flowchart?.nodes || []) as any[];
+			for (const node of nodes) {
+				const inputParams: string[] = node.data?.inputParams || [];
+				const outputParams: string[] = node.data?.outputParams || [];
+				for (const pid of inputParams) {
+					const refs = map.get(pid) || [];
+					refs.push({ flowchartId: fc.id, flowchartTitle: fc.title, nodeId: node.id, nodeLabel: node.data?.label || '', type: 'input' });
+					map.set(pid, refs);
+				}
+				for (const pid of outputParams) {
+					const refs = map.get(pid) || [];
+					refs.push({ flowchartId: fc.id, flowchartTitle: fc.title, nodeId: node.id, nodeLabel: node.data?.label || '', type: 'output' });
+					map.set(pid, refs);
+				}
+			}
+		}
+		return map;
+	});
 	let featureOptions = $derived([...new Set(parameterEntries.map((p: any) => (p.data || p.metadata || {}).featureName).filter(Boolean))]);
 	let moduleOptions = $derived([...new Set(entries.map((e: any) => (e.data || e.metadata || {}).moduleName).filter(Boolean))].sort());
 	let featureOptionsForModule = $derived(newModuleName ? [...new Set(entries.filter((e: any) => (e.data || e.metadata || {}).moduleName === newModuleName).map((e: any) => (e.data || e.metadata || {}).featureName).filter(Boolean))].sort() : []);
@@ -211,8 +241,9 @@
 			}
 			if (moduleType === 'parameter') {
 				prdEntries = await getEntries(token, projectId, 'prd');
+				flowchartEntries = await getEntries(token, projectId, 'flowchart');
 			}
-			if (moduleType === 'spec') {
+			if (moduleType === 'spec' || moduleType === 'requirement-boundary') {
 				requirementEntries = await getEntries(token, projectId, 'requirement');
 				parameterEntries = await getEntries(token, projectId, 'parameter');
 			}
@@ -271,7 +302,7 @@
 			} else if (moduleType === 'spec') {
 				data.data = { specCategory, relatedRequirements: specRelatedRequirements, relatedParameters: specRelatedParameters };
 			} else if (config.editorType === 'form') {
-				data.data = { ...newFormData };
+				data.data = { ...newFormData, title: newTitle };
 			}
 			// Auto-associate with current version for all module types
 			const currentVer = $currentVersion;
@@ -316,8 +347,47 @@
 		showSpecTemplateDialog = false;
 		showNewForm = true;
 	}
-	async function handleDelete(entryId: string) { try { const token = localStorage.token || ''; await deleteEntry(token, entryId); await loadEntries(); toast.success('删除成功'); } catch (e: any) { toast.error(e.message || '删除失败'); } }
+	async function handleDelete(entryId: string) {
+		try {
+			const token = localStorage.token || '';
+			if (moduleType === 'parameter') {
+				await cleanupFlowchartRefsForParam(entryId);
+			}
+			await deleteEntry(token, entryId);
+			await loadEntries();
+			toast.success('删除成功');
+		} catch (e: any) { toast.error(e.message || '删除失败'); }
+	}
 	async function handleExportToNote(entry: any) { try { const token = localStorage.token || ''; await createNewNote(token, { title: `[PM] ${entry.title}`, data: { content: { md: entry.content || '', html: '', json: null } }, meta: null, access_grants: [] }); toast.success('已导出为笔记'); } catch (e: any) { toast.error(e.message || '导出失败'); } }
+
+	async function cleanupFlowchartRefsForParam(paramId: string) {
+		const token = localStorage.token || '';
+		const refs = paramFlowchartRefs.get(paramId) || [];
+		if (refs.length === 0) return;
+		const affectedFcIds = [...new Set(refs.map(r => r.flowchartId))];
+		for (const fcId of affectedFcIds) {
+			const fcEntry = flowchartEntries.find((e: any) => e.id === fcId);
+			if (!fcEntry) continue;
+			const fcData = { ...(fcEntry.data || {}) };
+			const flowchart = fcData.flowchart || { nodes: [], edges: [] };
+			flowchart.nodes = (flowchart.nodes || []).map((node: any) => {
+				const inputParams = (node.data?.inputParams || []).filter((id: string) => id !== paramId);
+				const outputParams = (node.data?.outputParams || []).filter((id: string) => id !== paramId);
+				if (inputParams.length === (node.data?.inputParams || []).length && outputParams.length === (node.data?.outputParams || []).length) return node;
+				return { ...node, data: { ...node.data, inputParams, outputParams } };
+			});
+			fcData.flowchart = flowchart;
+			try { await updateEntry(token, fcId, { data: fcData }); } catch (e: any) { console.warn('[PM] cleanupFlowchartRefs failed for', fcId, e?.message); }
+		}
+		flowchartEntries = await getEntries(token, projectId, 'flowchart');
+	}
+
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	async function navigateToFlowchartEntry(_flowchartEntryId: string) {
+		// TODO: could scroll to / highlight the specific entry by ID
+		const url = `/pm/${projectId}/flowchart`;
+		goto(url);
+	}
 
 	// Filter / Sort / Pagination
 	let filterStatus = $state<string>('all');
@@ -488,7 +558,7 @@
 				data.data = { ...(editDrawerEntry.data || {} ) };
 			} else if (moduleType === 'parameter') {
 				data.data = { ...(editDrawerEntry.data || {} ) };
-			} else if (moduleType === 'prototype' || moduleType === 'schedule') {
+			} else if (moduleType === 'prototype' || moduleType === 'schedule' || moduleType === 'requirement-boundary') {
 				data.data = { ...(editDrawerEntry.data || {} ) };
 			}
 			// Preserve versionId from data if present
@@ -1061,7 +1131,7 @@
 						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="应对措施" rows="2" bind:value={newFormData.measures}></textarea>
 						<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" placeholder="截止日期" bind:value={newFormData.deadline} />
 					{:else if moduleType === 'acceptance'}
-						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="验收项" bind:value={newTitle} />
+						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="验收项" bind:value={newTitle} oninput={() => { newFormData.title = newTitle; }} />
 						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="验收范围" rows="2" bind:value={newFormData.scope}></textarea>
 						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="通过项（每行一个）" rows="2" bind:value={newFormData.passedItems}></textarea>
 						<div class="flex gap-2">
@@ -1071,6 +1141,25 @@
 							{/each}
 						</div>
 						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="遗留问题" rows="2" bind:value={newFormData.remainingIssues}></textarea>
+					{:else if moduleType === 'requirement-boundary'}
+						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder="场景" bind:value={newTitle} />
+						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500 resize-none" placeholder="功能" rows="2" bind:value={newFormData.function}></textarea>
+						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="使用方式" rows="2" bind:value={newFormData.usage}></textarea>
+						<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden resize-none" placeholder="预期效果" rows="2" bind:value={newFormData.expectedEffect}></textarea>
+						<div class="flex gap-2">
+							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFormData.relatedRequirements}>
+								<option value="">关联需求（可选）</option>
+								{#each requirementEntries as req (req.id)}
+									<option value={req.id}>{req.title}</option>
+								{/each}
+							</select>
+							<select class="flex-1 text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden" bind:value={newFormData.relatedParameters}>
+								<option value="">关联参数（可选）</option>
+								{#each parameterEntries as param (param.id)}
+									<option value={param.id}>{param.title}</option>
+								{/each}
+							</select>
+						</div>
 					{:else}
 						<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border-0 rounded-xl outline-hidden focus:ring-2 focus:ring-blue-500" placeholder={moduleType === 'roadmap' ? '节点名称' : '标题'} bind:value={newTitle} onkeydown={(e) => { if (e.key === 'Enter' && newTitle.trim()) handleCreate(); }} />
 						{#if isRichView || moduleType === 'meeting'}
@@ -1442,6 +1531,16 @@
 										{/if}
 									{:else if col.key === 'isMilestone'}
 										{#if getEntryData(entry, 'isMilestone')}<span class="px-1.5 py-0.5 rounded text-xs bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400">★</span>{:else}<span class="text-xs text-gray-400">-</span>{/if}
+									{:else if col.key === 'function'}
+										<span class="text-xs text-gray-600 dark:text-gray-400 truncate block max-w-24">{getEntryData(entry, 'function') || '-'}</span>
+									{:else if col.key === 'usage'}
+										<span class="text-xs text-gray-600 dark:text-gray-400 truncate block max-w-24">{getEntryData(entry, 'usage') || '-'}</span>
+									{:else if col.key === 'expectedEffect'}
+										<span class="text-xs text-gray-600 dark:text-gray-400 truncate block max-w-24">{getEntryData(entry, 'expectedEffect') || '-'}</span>
+									{:else if col.key === 'relatedRequirements'}
+										<span class="text-xs text-gray-600 dark:text-gray-400 truncate block max-w-20">{getEntryData(entry, 'relatedRequirements') || '-'}</span>
+									{:else if col.key === 'relatedParameters'}
+										<span class="text-xs text-gray-600 dark:text-gray-400 truncate block max-w-20">{getEntryData(entry, 'relatedParameters') || '-'}</span>
 									{:else}
 										<span class="text-xs text-gray-600 dark:text-gray-400">{getEntryData(entry, col.key) || '-'}</span>
 									{/if}
@@ -1596,6 +1695,16 @@
 									</span>
 								{/if}
 							</div>
+						{:else if moduleType === 'parameter'}
+							{@const pRefs = paramFlowchartRefs.get(entry.id) || []}
+							{#if pRefs.length > 0}
+								<div class="flex flex-wrap gap-1 mt-1">
+									{#each pRefs as ref}
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<span class="px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/30 transition {ref.type === 'input' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400' : 'bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400'}" onclick={(e) => { e.stopPropagation(); navigateToFlowchartEntry(ref.flowchartId); }}>{ref.flowchartTitle} - {ref.nodeLabel} ({ref.type === 'input' ? '输入' : '输出'})</span>
+									{/each}
+								</div>
+							{/if}
 						{:else if entry.content}
 							<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{entry.content}</div>
 						{/if}
