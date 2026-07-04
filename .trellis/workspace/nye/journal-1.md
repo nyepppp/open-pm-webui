@@ -336,3 +336,36 @@ Verified all PRD requirements met: 3 PM Skills (pm-prd-generation, pm-requiremen
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: pm-quality-check-engine: enhance suggest_fix with AI
+
+**Date**: 2026-07-04
+**Task**: pm-quality-check-engine: enhance suggest_fix with AI
+**Branch**: `main`
+
+### Summary
+
+Verified PRD acceptance: 36 check rules across L1-L4 (>=30 required), rule engine with dynamic JSON config, pm_check_tool.py with 5 callables, pm-check-quality.md skill. Enhanced suggest_fix to call AI check endpoint first, then fallback to rule-based suggestions.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `51935bd26` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
