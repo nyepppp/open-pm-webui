@@ -140,3 +140,36 @@ Two modules completed in this session: 1) SPEC module (commit 471b5ccf7) — tem
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Fix flowchart click + parameter bidirectional sync
+
+**Date**: 2026-07-04
+**Task**: Fix flowchart click + parameter bidirectional sync
+**Branch**: `main`
+
+### Summary
+
+Fixed flowchart node click bug (replaced non-existent useOnSelectionChange with on:nodeclick/on:paneclick, added min-height, guarded  infinite loop). Implemented parameter↔flowchart bidirectional sync: reverse index for param→flowchart node mapping, '关联节点' badges on parameter cards, parameter delete→flowchart cleanup, click-to-navigate. Updated component-guidelines.md spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f485ce05f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
