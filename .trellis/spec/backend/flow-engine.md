@@ -294,3 +294,38 @@ HTTP DELETE with a request body is non-standard and many clients/proxies will st
 ### Parameter name shadowing builtins
 
 Avoid `format` as a parameter name (shadows Python builtin). Use `export_format` or `output_format` instead.
+
+---
+
+## Break-Loop Analysis: Cross-Layer Contract Bugs
+
+> Deep analysis of the 6 bugs found by trellis-check in `pm-backend-api`. Extracted to prevent recurrence of the entire bug class.
+
+### Root Cause Pattern
+
+**Dominant category: B (Cross-Layer Contract)** — interface mismatches between layers:
+
+| Layer A | Layer B | Mismatch | Bug |
+|---------|---------|----------|-----|
+| LLM response (markdown-wrapped) | JSON parser (expects raw JSON) | Format contract | `json.loads` fails on markdown fences |
+| User dict (`metadata`) | Pydantic model (`entity_metadata`) | Field name contract | 422 ValidationError |
+| Workflow code (assumes `execute()`) | BaseSkill class (no `execute()`) | API contract | AttributeError |
+| Condition evaluator (`eval`) | Safety requirement | Trust boundary | Security vulnerability |
+
+### _call_llm Empty Model Risk
+
+`_call_llm` uses `'model': ''` — an empty model string. If OpenWebUI has no default model configured, **all LLM-dependent features break silently** (returns empty string, endpoints return fallback "AI 服务暂不可用"). This is a latent bug — not a crash, but every AI feature degrades to empty results with no error message to the user.
+
+**Mitigation**: Consider logging a warning when `_call_llm` receives an empty response, or adding a model configuration check at startup.
+
+### Prevention: When Adding New LLM-Calling Code
+
+Checklist before writing any endpoint that calls `_call_llm`:
+
+- [ ] Use `_extract_json(llm_response, expect_list=...)` — NEVER `json.loads(llm_response)` directly
+- [ ] Handle `None`/empty LLM response with a structured fallback
+- [ ] Verify the Pydantic model field names match dict keys when constructing forms
+- [ ] For new skill integrations, check `BaseSkill` available methods — there is NO `execute()`
+- [ ] For agent tool endpoints needing a body, use POST (not DELETE)
+- [ ] For condition evaluation, use `ast.literal_eval()` (not `eval()`)
+- [ ] Avoid Python builtin names as parameters (`format`, `input`, `list`, `dict`, `type`)
