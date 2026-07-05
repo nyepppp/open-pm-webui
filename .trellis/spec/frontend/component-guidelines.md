@@ -725,7 +725,133 @@ export async function getEntries(token: string, projectId: string, moduleType?: 
 
 ---
 
-## Reusable Form Components
+## Architecture-Parameter Merge Pattern
+
+### Design Decision: Merge two modules into a single page with tab switching
+
+**Context**: The `product-architecture` (mindmap) and `parameter` (table) modules were separate pages but conceptually related. Users needed to see both the architecture hierarchy and the parameter details for each module/feature.
+
+**Decision**: Merge them into a single `/pm/architecture` route with two tabs:
+- **架构图** (mindmap): Visual product→module→function hierarchy
+- **参数详情** (params): Left tree (module→feature) + right parameter table
+
+**Why**: Reduces navigation friction, enables cross-tab navigation (click mindmap node → see its params), and unifies the data model.
+
+### Pattern: Aggregated tree from multiple data sources
+
+The params tab builds a unified module/feature tree from TWO sources:
+
+```typescript
+// 1. Auto nodes from parameter entries (moduleName/featureName fields)
+// 2. Manual nodes from product-architecture entry's mindmap nodes (metadata.source === 'manual')
+
+function aggregateModuleFeatureTree(paramEntries: ModuleEntry[], archEntries: ModuleEntry[]): TreeModule[] {
+    // Auto modules from parameter entries
+    const autoModules = new Map<string, Set<string>>();
+    for (const entry of paramEntries) {
+        const mod = entry.data?.moduleName;
+        const feat = entry.data?.featureName;
+        if (mod) { /* ... */ }
+    }
+    // Manual modules from architecture entry nodes
+    const manualModules = new Map<string, Set<string>>();
+    for (const entry of archEntries) {
+        const nodes = entry.data?.nodes as MindMapNode[];
+        // Extract manual branch/leaf nodes
+    }
+    // Merge: auto primary, manual supplements
+}
+```
+
+**Why**: Parameters define what exists (auto nodes), architecture defines what is planned (manual nodes). The merge shows the complete picture.
+
+### Pattern: Cross-tab navigation with state sync
+
+Clicking a mindmap node navigates to the params tab with pre-selected module/feature:
+
+```typescript
+// In architecture/+page.svelte
+function handleNavigate(target: { moduleName: string; featureName?: string }) {
+    navigateToModule = target.moduleName;
+    navigateToFeature = target.featureName || null;
+    activeTab = 'params';
+}
+
+// Sync into tree selection via $effect
+$effect(() => {
+    if (navigateToModule) {
+        selectedModule = navigateToModule;
+        selectedFeature = navigateToFeature;
+        navigateToModule = null;
+        navigateToFeature = null;
+    }
+});
+```
+
+**Why**: `$effect` handles the async nature of tab switching — the effect fires after the reactive update, ensuring the tree selection is set when the params tab renders.
+
+### Pattern: Manual node CRUD via architecture API
+
+Adding/deleting manual modules/features saves to the product-architecture entry's mindmap nodes:
+
+```typescript
+async function handleAddModule(name: string) {
+    const newNode: MindMapNode = {
+        id: `manual-${Date.now()}`,
+        type: 'branch',
+        label: name,
+        parentId: null,
+        position: { x: 0, y: 0 },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        metadata: { source: 'manual' }
+    };
+    await handleMindmapChange([...currentNodes, newNode]);
+    await loadData(); // Refresh aggregated tree
+}
+```
+
+**Why**: Manual nodes are stored in the architecture entry (not as parameter entries) to keep the data model clean. The `source: 'manual'` marker distinguishes them from auto nodes.
+
+### Convention: Visual distinction for auto vs manual nodes
+
+| Aspect | Auto Node | Manual Node |
+|--------|-----------|-------------|
+| Border | Solid | Dashed |
+| Badge | None | "规划中" |
+| Deletable | No | Yes |
+| Source | Parameter entries | Architecture entry |
+
+```svelte
+<!-- ModuleFeatureTree.svelte -->
+{#if mod.source === 'manual'}
+    <span class="text-xs text-orange-500">规划中</span>
+{/if}
+{#if mod.source === 'manual' && onDeleteModule}
+    <button onclick={(e) => { e.stopPropagation(); onDeleteModule?.(mod.name); }}>×</button>
+{/if}
+```
+
+**Why**: Users need to understand which nodes have backing data (auto) vs which are just planned (manual). Auto nodes cannot be deleted because they represent real parameter entries.
+
+### Convention: Responsive tree panel with auto-collapse
+
+The params tab uses a collapsible left panel that auto-collapses on small screens:
+
+```typescript
+$effect(() => {
+    function onResize() {
+        if (window.innerWidth < 768 && !treeCollapsed) treeCollapsed = true;
+    }
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+});
+```
+
+**Why**: On mobile, the tree panel takes too much space. Auto-collapse to a dropdown selector (`collapsed={true}`) preserves functionality without overwhelming the layout.
+
+---
 
 ### Pattern: PMForm* component family
 

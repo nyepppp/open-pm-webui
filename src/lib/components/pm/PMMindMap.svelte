@@ -6,6 +6,18 @@
 	import { autoExtractArchitecture, syncArchitecture, type ArchitectureSyncDiff } from '$lib/apis/pm/index';
 	import { toast } from 'svelte-sonner';
 
+	interface TreeModule {
+		name: string;
+		source: 'auto' | 'manual';
+		features: TreeFeature[];
+	}
+
+	interface TreeFeature {
+		name: string;
+		source: 'auto' | 'manual';
+		paramCount: number;
+	}
+
 	interface Version {
 		id: string;
 		versionNumber: string;
@@ -19,6 +31,8 @@
 		projectId?: string;
 		versions?: Version[];
 		onSync?: (diff: ArchitectureSyncDiff) => void;
+		aggregatedModules?: TreeModule[];
+		onNavigate?: (target: { moduleName: string; featureName?: string }) => void;
 	}
 
 	let {
@@ -27,11 +41,100 @@
 		readonly = false,
 		projectId = '',
 		versions = [],
-		onSync
+		onSync,
+		aggregatedModules = [],
+		onNavigate
 	}: Props = $props();
 
 	const LARGE_GRAPH_THRESHOLD = 200;
-	let isLargeGraph = $derived(initialNodes.length > LARGE_GRAPH_THRESHOLD);
+
+	// Build effective nodes: either from aggregatedModules or from initialNodes
+	let effectiveNodes = $derived.by(() => {
+		if (aggregatedModules.length > 0) {
+			// Generate nodes from aggregated tree
+			const nodes: MindMapNode[] = [];
+			let yIdx = 0;
+
+			// Root node
+			const rootId = 'root-product';
+			nodes.push({
+				id: rootId,
+				projectId,
+				parentId: null,
+				label: '产品',
+				type: 'root',
+				position: { x: 400, y: 50 },
+				metadata: { source: 'auto' },
+				moduleRef: null,
+				createdAt: Date.now(),
+				updatedAt: Date.now()
+			});
+
+			// Module nodes (branch)
+			for (const mod of aggregatedModules) {
+				const modId = `mod-${mod.name}`;
+				nodes.push({
+					id: modId,
+					projectId,
+					parentId: rootId,
+					label: mod.name,
+					type: 'branch',
+					position: { x: yIdx * 280 + 100, y: 200 },
+					metadata: { source: mod.source },
+					moduleRef: null,
+					createdAt: Date.now(),
+					updatedAt: Date.now()
+				});
+
+				// Feature nodes (leaf)
+				for (let fi = 0; fi < mod.features.length; fi++) {
+					const feat = mod.features[fi];
+					nodes.push({
+						id: `feat-${mod.name}-${feat.name}`,
+						projectId,
+						parentId: modId,
+						label: feat.name,
+						type: 'leaf',
+						position: { x: yIdx * 280 + 100, y: 300 + fi * 80 },
+						metadata: { source: feat.source, paramCount: feat.paramCount },
+						moduleRef: null,
+						createdAt: Date.now(),
+						updatedAt: Date.now()
+					});
+				}
+				yIdx++;
+			}
+
+			// Also include any manual nodes from initialNodes that have metadata.source === 'manual'
+			// and are not already covered by aggregatedModules
+			const autoModuleNames = new Set(aggregatedModules.map(m => m.name));
+			const autoFeatureKeys = new Set(aggregatedModules.flatMap(m => m.features.map(f => `${m.name}::${f.name}`)));
+			for (const node of initialNodes) {
+				if (node.metadata?.source === 'manual') {
+					if (node.type === 'branch' && !autoModuleNames.has(node.label)) {
+						if (!nodes.find(n => n.id === node.id)) {
+							nodes.push({ ...node, parentId: rootId });
+						}
+					} else if (node.type === 'leaf' && node.parentId) {
+						const parentNode = initialNodes.find(n => n.id === node.parentId);
+						if (parentNode) {
+							const key = `${parentNode.label}::${node.label}`;
+							if (!autoFeatureKeys.has(key)) {
+								if (!nodes.find(n => n.id === node.id)) {
+									nodes.push(node);
+								}
+							}
+						}
+					}
+				}
+			}
+
+			return nodes;
+		}
+		return initialNodes;
+	});
+
+	let isLargeGraph = $derived(effectiveNodes.length > LARGE_GRAPH_THRESHOLD);
 
 	let viewportBounds = $state({ x: -500, y: -500, width: 2000, height: 2000 });
 	const VIEWPORT_PADDING = 300;
@@ -46,8 +149,8 @@
 	let hoveredNodeId = $state<string | null>(null);
 
 	let versionFilteredNodes = $derived.by(() => {
-		if (!selectedVersionId) return initialNodes;
-		return initialNodes.filter((node) => {
+		if (!selectedVersionId) return effectiveNodes;
+		return effectiveNodes.filter((node) => {
 			const meta = node.metadata || {};
 			const nodeVersionId = meta.versionId as string | undefined;
 			return !nodeVersionId || nodeVersionId === selectedVersionId;
@@ -55,29 +158,34 @@
 	});
 
 	function toFlowNodes(nodes: MindMapNode[]): Node[] {
-		return nodes.map((node) => ({
-			id: node.id,
-			position: node.position,
-			data: {
-				label: node.label,
-				type: node.type,
-				metadata: node.metadata,
-				moduleRef: node.moduleRef
-			},
-			style: {
-				background: getNodeColor(node.type),
-				borderColor: getNodeBorderColor(node.type),
-				borderWidth: 2,
-				borderRadius: 8,
-				padding: '8px 16px',
-				fontSize: 14,
-				fontWeight: node.type === 'root' ? 600 : 400,
-				color: '#1f2937',
-				minWidth: 120,
-				textAlign: 'center'
-			},
-			parentId: node.parentId || undefined
-		}));
+		return nodes.map((node) => {
+			const source = node.metadata?.source as string | undefined;
+			const isManual = source === 'manual';
+			return {
+				id: node.id,
+				position: node.position,
+				data: {
+					label: node.label,
+					type: node.type,
+					metadata: node.metadata,
+					moduleRef: node.moduleRef
+				},
+				style: {
+					background: getNodeColor(node.type, source),
+					borderColor: getNodeBorderColor(node.type, source),
+					borderWidth: 2,
+					borderStyle: isManual ? 'dashed' : 'solid',
+					borderRadius: 8,
+					padding: '8px 16px',
+					fontSize: 14,
+					fontWeight: node.type === 'root' ? 600 : 400,
+					color: '#1f2937',
+					minWidth: 120,
+					textAlign: 'center' as const
+				},
+				parentId: node.parentId || undefined
+			};
+		});
 	}
 
 	function toFlowEdges(nodes: MindMapNode[]): Edge[] {
@@ -96,7 +204,8 @@
 		return edges;
 	}
 
-	function getNodeColor(type: string): string {
+	function getNodeColor(type: string, source?: string): string {
+		if (source === 'manual') return '#f9fafb'; // lighter for manual
 		switch (type) {
 			case 'root':
 				return '#dbeafe';
@@ -111,7 +220,8 @@
 		}
 	}
 
-	function getNodeBorderColor(type: string): string {
+	function getNodeBorderColor(type: string, source?: string): string {
+		if (source === 'manual') return '#9ca3af'; // gray dashed for manual
 		switch (type) {
 			case 'root':
 				return '#3b82f6';
@@ -242,7 +352,23 @@
 		selectedNodeId = node.id;
 		const moduleRef = node.data?.moduleRef as string | undefined;
 		const moduleType = node.data?.metadata?.moduleType as string | undefined;
-		if (moduleRef && moduleType && projectId) {
+		const nodeSource = node.data?.metadata?.source as string | undefined;
+
+		// If onNavigate is provided, use it for cross-tab navigation
+		if (onNavigate && (node.data?.type === 'branch' || node.data?.type === 'leaf')) {
+			const moduleName = node.data?.type === 'branch' ? (node.data?.label as string) : undefined;
+			const featureName = node.data?.type === 'leaf' ? (node.data?.label as string) : undefined;
+
+			if (node.data?.type === 'leaf') {
+				// Find parent module name for leaf nodes
+				const parentEdge = $allEdges.find(e => e.target === node.id);
+				const parentNode = parentEdge ? $allNodes.find(n => n.id === parentEdge.source) : null;
+				onNavigate({ moduleName: parentNode?.data?.label as string || '', featureName: featureName });
+			} else {
+				onNavigate({ moduleName: moduleName || '' });
+			}
+		} else if (moduleRef && moduleType && projectId) {
+			// Fallback to existing route navigation
 			window.location.href = `/pm/${projectId}/${moduleType}`;
 		}
 	}
@@ -325,7 +451,7 @@
 				</svg>
 				添加节点
 			</button>
-			{#if selectedNodeId}
+			{#if selectedNodeId && (() => { const n = $allNodes.find(n => n.id === selectedNodeId); return n?.data?.metadata?.source !== 'auto'; })()}
 				<button
 					class="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
 					onclick={() => {
@@ -417,7 +543,13 @@
 				<div class="font-medium text-sm text-gray-900 dark:text-white mb-1">{hd.label}</div>
 				<div class="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
 					<div>类型: {hd.metadata?.moduleType || hd.type}</div>
-					{#if hd.metadata?.status}
+					{#if hd.metadata?.source === 'auto'}
+						<div>来源: 自动聚合</div>
+					{:else if hd.metadata?.source === 'manual'}
+						<div>来源: 手动添加</div>
+						<div class="text-orange-500">状态: 规划中</div>
+					{/if}
+					{#if hd.metadata?.status && hd.metadata?.source !== 'manual'}
 						<div>状态: {hd.metadata.status}</div>
 					{/if}
 					{#if hd.metadata?.priority}
@@ -425,6 +557,9 @@
 					{/if}
 					{#if hd.metadata?.versionId}
 						<div>版本: {hd.metadata.versionId}</div>
+					{/if}
+					{#if hd.metadata?.paramCount}
+						<div>参数数: {hd.metadata.paramCount}</div>
 					{/if}
 					{#if hd.moduleRef}
 						<div class="text-blue-500">可导航至条目</div>

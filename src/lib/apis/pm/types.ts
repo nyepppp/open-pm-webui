@@ -23,7 +23,8 @@ export type ModuleType =
 	| 'schedule'
 	| 'requirement-boundary'
 	| 'spec'
-	| 'flowchart';
+	| 'flowchart'
+	| 'architecture';
 
 export type ModuleCategory = 'planning' | 'design' | 'execution' | 'review';
 
@@ -279,6 +280,8 @@ export interface MindMapNode {
 		versionId?: string;
 		priority?: string;
 		entryCount?: number;
+		source?: 'auto' | 'manual';
+		paramCount?: number;
 	};
 	moduleRef?: string | null;
 	createdAt: number;

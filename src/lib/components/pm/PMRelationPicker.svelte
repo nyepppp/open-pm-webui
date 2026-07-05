@@ -42,7 +42,10 @@
 		'product-architecture': '产品架构',
 		prototype: '原型',
 		schedule: '排期',
-		'requirement-boundary': '需求边界'
+		'requirement-boundary': '需求边界',
+		spec: 'SPEC规范',
+		flowchart: '流程图',
+		architecture: '产品架构'
 	};
 
 	// Filtered items based on search
