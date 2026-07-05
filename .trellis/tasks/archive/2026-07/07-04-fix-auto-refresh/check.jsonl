@@ -1,0 +1,5 @@
+{"task":"fix-auto-refresh","check":"首次加载不刷新","description":"清除缓存后首次访问页面，确认不触发自动刷新"}
+{"task":"fix-auto-refresh","check":"版本更新仍刷新","description":"模拟版本变化，确认仍然自动刷新（预期行为）"}
+{"task":"fix-auto-refresh","check":"Token过期导航","description":"模拟token过期，确认使用goto导航而非location.href"}
+{"task":"fix-auto-refresh","check":"长时间保持","description":"保持页面打开5分钟，确认无自动刷新"}
+{"task":"fix-auto-refresh","check":"触摸下拉刷新","description":"在移动设备上测试，确认下拉刷新功能仍然可用"}

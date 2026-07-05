@@ -1,0 +1,2 @@
+{"task":"fix-auto-refresh","file":"src/routes/+layout.svelte","description":"版本检测逻辑修复 - 添加初始化保护","line_start":160,"line_end":168,"change_type":"modify"}
+{"task":"fix-auto-refresh","file":"src/routes/+layout.svelte","description":"Token过期跳转修复 - 使用goto替代location.href","line_start":762,"line_end":779,"change_type":"modify"}

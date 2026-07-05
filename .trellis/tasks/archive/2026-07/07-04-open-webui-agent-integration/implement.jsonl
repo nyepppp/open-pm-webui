@@ -1,0 +1,4 @@
+{"type": "context", "content": "Task: PRD 页面优化 - 移除章节侧边栏 & 增强批注功能"}
+{"type": "file", "path": "prd.md", "description": "任务需求文档"}
+{"type": "file", "path": "design.md", "description": "技术设计文档"}
+{"type": "file", "path": "implement.md", "description": "执行计划文档"}
