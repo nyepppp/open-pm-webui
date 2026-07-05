@@ -29,6 +29,7 @@ FLOW_TEMPLATES (hardcoded)  ──→  FLOW_EXECUTORS (dispatch)  ──→  _fl
 | `prd_to_parameter` | prd → parameter | Extract parameters via LLM |
 | `parameter_to_testcase` | parameter → testcase | Generate test cases via LLM |
 | `full_chain` | requirement → testcase | Chains all three above |
+| `idea_to_prd` | requirement → prd | 3-step: Analysis → Review → PRD Generation |
 
 Custom templates are stored as entries with `module_type="flow_template"`, prefixed `custom_` in listing.
 
@@ -42,6 +43,8 @@ Custom templates are stored as entries with `module_type="flow_template"`, prefi
 | `POST` | `/pm/flow/preview` | Dry-run preview (no writes) |
 | `POST` | `/pm/flow/execute` | Execute flow (requires `confirmed=True`) |
 | `POST` | `/pm/flow/templates` | Create custom flow template |
+| `POST` | `/pm/projects/{id}/architecture/auto-extract` | Auto-extract architecture from entries |
+| `POST` | `/pm/projects/{id}/architecture/sync` | Re-extract with diff, optionally apply |
 
 ---
 
@@ -180,6 +183,67 @@ generated_content = _extract_json(llm_response, expect_list=False)
 if not generated_content:
     generated_content = llm_response  # Fallback to raw text
 ```
+
+---
+
+## Pattern: Idea → PRD Flow (`_flow_idea_to_prd`)
+
+3-step pipeline using dedicated skills:
+
+1. **Requirement Analysis** — `RequirementAnalysisSkill` analyzes source entries
+2. **Multi-role Review** — `RequirementReviewSkill` simulates 4-role review (产品经理, 技术负责人, UX设计师, QA负责人)
+3. **PRD Generation** — `PRDGenerationSkill` generates PRD from review results
+
+Each step creates a `PMEntry` with `derives` relations back to its source. The `PRDGenerationSkill.build_user_message` accepts an optional `template_content` parameter for custom PRD templates (from SPEC entries with `specCategory='prd-template'`).
+
+```python
+# Step 1: Analysis
+analysis_skill = RequirementAnalysisSkill()
+analysis_msg = analysis_skill.build_user_message(user_message=f'请分析以下需求：\n\n{req_summary}', project_id=project_id)
+analysis_response = await _call_llm(request, user, analysis_skill.system_prompt, analysis_msg)
+
+# Step 2: Review
+review_skill = RequirementReviewSkill()
+review_msg = review_skill.build_user_message(user_message=f'请评审以下需求...', project_id=project_id)
+review_response = await _call_llm(request, user, review_skill.system_prompt, review_msg)
+
+# Step 3: PRD Generation
+prd_skill = PRDGenerationSkill()
+prd_msg = prd_skill.build_user_message(user_message=f'请根据以下需求和评审结果生成PRD...', project_id=project_id)
+prd_response = await _call_llm(request, user, prd_skill.system_prompt, prd_msg)
+parsed = _extract_json(prd_response, expect_list=False)
+```
+
+---
+
+## Pattern: Architecture Auto-Extract & Sync
+
+### POST /pm/projects/{id}/architecture/auto-extract
+
+Scans all module entries in the project, groups by `module_type`, builds a `MindMapNode` tree:
+
+```
+Root ("Product Architecture")
+  ├── Branch (module_type: "requirement")
+  │   ├── Leaf (entry.title, moduleRef: entry.id)
+  │   └── Leaf (entry.title, moduleRef: entry.id)
+  ├── Branch (module_type: "prd")
+  │   └── Leaf (entry.title, moduleRef: entry.id)
+  └── ...
+```
+
+Each leaf node has `moduleRef` set to the entry ID for navigation, and `metadata.versionId` for version tracking.
+
+Optional `version_id` filter: only includes entries associated with that project version via `PMEntryVersion.project_version_id`.
+
+### POST /pm/projects/{id}/architecture/sync
+
+1. Re-extracts architecture from current entries
+2. Compares with existing architecture entry using label-based diff
+3. Returns `{diff: {added, removed, modified}}` without applying
+4. If `apply=True`, updates (or creates) the architecture entry with new nodes
+
+Diff comparison uses leaf node labels as keys. Nodes present in new but not old are `added`, vice versa for `removed`, and nodes with changed `moduleType` or `moduleRef` are `modified`.
 
 ---
 

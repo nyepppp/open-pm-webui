@@ -1,9 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import { toast } from 'svelte-sonner';
+	import { getFlowTemplates, executeFlow, previewFlow, type FlowTemplate, type FlowPreview } from '$lib/apis/pm/index';
+	import { getEntries } from '$lib/apis/pm/index';
+	import type { ModuleEntry } from '$lib/apis/pm/types';
 
 	let projectId = $derived($page.params.projectId);
 
-	// Step categories
 	const categories: Record<string, { label: string; color: string }> = {
 		planning: { label: '规划', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
 		design: { label: '设计', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' },
@@ -13,7 +17,6 @@
 		enablement: { label: '赋能', color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300' }
 	};
 
-	// Step statuses
 	const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
 		pending: { label: '待开始', color: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400', dot: 'bg-gray-400 dark:bg-gray-500' },
 		in_progress: { label: '进行中', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300', dot: 'bg-blue-500' },
@@ -22,162 +25,92 @@
 		skipped: { label: '已跳过', color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300', dot: 'bg-yellow-500' }
 	};
 
-	interface Deliverable {
-		name: string;
-		module: string;
-	}
+	const moduleCategoryMap: Record<string, string> = {
+		requirement: 'planning', competitor: 'planning', prd: 'design',
+		parameter: 'design', prototype: 'design', testcase: 'enablement',
+		schedule: 'management', meeting: 'management', risk: 'management',
+		acceptance: 'acceptance', 'product-architecture': 'design',
+		spec: 'review', faq: 'review'
+	};
 
-	interface WorkflowStep {
+	interface FlowStep {
 		id: string;
 		name: string;
 		category: string;
 		status: string;
 		description: string;
-		deliverables: Deliverable[];
-		nextSteps: string[];
+		templateId: string;
+		inputModule: string;
+		outputModule: string;
 	}
 
-	// Default workflow template (mock data)
-	let workflowSteps = $state<WorkflowStep[]>([
-		{
-			id: 'requirement',
-			name: '需求收集',
-			category: 'planning',
-			status: 'completed',
-			description: '收集和整理项目需求，明确业务目标和用户痛点',
-			deliverables: [
-				{ name: '需求文档', module: 'requirement' },
-				{ name: '用户故事地图', module: 'requirement' }
-			],
-			nextSteps: ['组织需求评审会议', '确认优先级排序']
-		},
-		{
-			id: 'competitor',
-			name: '竞品分析',
-			category: 'planning',
-			status: 'completed',
-			description: '分析竞品功能、体验和商业模式，找出差异化机会',
-			deliverables: [{ name: '竞品分析报告', module: 'competitor' }],
-			nextSteps: ['提炼差异化功能点', '确定产品定位']
-		},
-		{
-			id: 'prd',
-			name: 'PRD编写',
-			category: 'design',
-			status: 'in_progress',
-			description: '编写产品需求文档，详细描述功能规格和交互逻辑',
-			deliverables: [
-				{ name: 'PRD文档', module: 'prd' },
-				{ name: '功能清单', module: 'prd' }
-			],
-			nextSteps: ['完成核心功能描述', '补充非功能性需求']
-		},
-		{
-			id: 'parameter',
-			name: '参数提取',
-			category: 'design',
-			status: 'pending',
-			description: '从PRD中提取配置参数和技术参数，形成参数矩阵',
-			deliverables: [{ name: '参数矩阵表', module: 'parameter' }],
-			nextSteps: ['梳理可配置参数', '确认参数默认值']
-		},
-		{
-			id: 'prototype',
-			name: '原型走查',
-			category: 'design',
-			status: 'pending',
-			description: '对原型设计进行走查，确保交互逻辑和视觉规范一致',
-			deliverables: [
-				{ name: '走查记录', module: 'prototype' },
-				{ name: '问题清单', module: 'prototype' }
-			],
-			nextSteps: ['确认设计规范', '标记高优先级问题']
-		},
-		{
-			id: 'testcase',
-			name: '测试用例',
-			category: 'enablement',
-			status: 'pending',
-			description: '根据PRD编写测试用例，覆盖核心业务场景',
-			deliverables: [{ name: '测试用例集', module: 'testcase' }],
-			nextSteps: ['覆盖核心场景', '补充边界用例']
-		},
-		{
-			id: 'schedule',
-			name: '排期',
-			category: 'management',
-			status: 'pending',
-			description: '制定项目排期计划，明确里程碑和资源分配',
-			deliverables: [
-				{ name: '排期计划', module: 'schedule' },
-				{ name: '资源分配表', module: 'schedule' }
-			],
-			nextSteps: ['确认关键里程碑', '评估资源风险']
-		},
-		{
-			id: 'meeting',
-			name: '评审',
-			category: 'management',
-			status: 'pending',
-			description: '组织PRD评审会议，收集反馈并达成共识',
-			deliverables: [
-				{ name: '评审纪要', module: 'meeting' },
-				{ name: '待办事项', module: 'meeting' }
-			],
-			nextSteps: ['发送评审邀请', '准备评审材料']
-		},
-		{
-			id: 'risk',
-			name: '风险管控',
-			category: 'management',
-			status: 'pending',
-			description: '识别项目风险并制定应对策略',
-			deliverables: [{ name: '风险登记表', module: 'risk' }],
-			nextSteps: ['识别高风险项', '制定缓解措施']
-		},
-		{
-			id: 'acceptance',
-			name: '验收',
-			category: 'acceptance',
-			status: 'pending',
-			description: '按验收标准对交付物进行验收确认',
-			deliverables: [
-				{ name: '验收报告', module: 'acceptance' },
-				{ name: '问题清单', module: 'acceptance' }
-			],
-			nextSteps: ['确认验收标准', '执行验收测试']
-		},
-		{
-			id: 'review',
-			name: '复盘',
-			category: 'review',
-			status: 'pending',
-			description: '对项目过程进行复盘总结，沉淀经验教训',
-			deliverables: [
-				{ name: '复盘报告', module: 'review' },
-				{ name: '改进计划', module: 'review' }
-			],
-			nextSteps: ['组织复盘会议', '梳理改进项']
-		}
-	]);
-
+	let flowTemplates = $state<FlowTemplate[]>([]);
+	let flowSteps = $state<FlowStep[]>([]);
+	let entriesByModule = $state<Record<string, ModuleEntry[]>>({});
+	let loading = $state(true);
 	let selectedStepId = $state<string | null>(null);
 	let showCreateModal = $state(false);
+	let executingStepId = $state<string | null>(null);
+	let showPreviewModal = $state(false);
+	let previewData = $state<FlowPreview | null>(null);
+	let previewingStepId = $state<string | null>(null);
 
-	let selectedStep = $derived(workflowSteps.find((s) => s.id === selectedStepId) ?? null);
-	let completedCount = $derived(workflowSteps.filter((s) => s.status === 'completed').length);
-	let totalCount = $derived(workflowSteps.length);
+	let selectedStep = $derived(flowSteps.find((s) => s.id === selectedStepId) ?? null);
+	let completedCount = $derived(flowSteps.filter((s) => s.status === 'completed').length);
+	let totalCount = $derived(flowSteps.length);
 	let progressPercent = $derived(totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0);
+
+	async function loadData() {
+		if (!projectId) return;
+		loading = true;
+		try {
+			const token = (typeof localStorage !== 'undefined' && localStorage.token) || '';
+			const [tplResult, entriesResult] = await Promise.all([
+				getFlowTemplates(token, projectId),
+				getEntries(token, projectId)
+			]);
+			flowTemplates = tplResult.templates;
+
+			const byModule: Record<string, ModuleEntry[]> = {};
+			for (const entry of entriesResult) {
+				const mt = entry.moduleType || 'unknown';
+				if (!byModule[mt]) byModule[mt] = [];
+				byModule[mt].push(entry);
+			}
+			entriesByModule = byModule;
+
+			buildFlowSteps();
+		} catch (e) {
+			console.error('Failed to load workflow data', e);
+		} finally {
+			loading = false;
+		}
+	}
+
+	function buildFlowSteps() {
+		const steps: FlowStep[] = flowTemplates.map((tpl) => {
+			const hasInput = (entriesByModule[tpl.input_module]?.length ?? 0) > 0;
+			const hasOutput = (entriesByModule[tpl.output_module]?.length ?? 0) > 0;
+			let status = 'pending';
+			if (hasOutput) status = 'completed';
+			else if (hasInput) status = 'in_progress';
+
+			return {
+				id: tpl.id,
+				name: tpl.name,
+				category: moduleCategoryMap[tpl.input_module] || 'planning',
+				status,
+				description: tpl.description,
+				templateId: tpl.id,
+				inputModule: tpl.input_module,
+				outputModule: tpl.output_module
+			};
+		});
+		flowSteps = steps;
+	}
 
 	function toggleStep(id: string) {
 		selectedStepId = selectedStepId === id ? null : id;
-	}
-
-	function markStepStatus(stepId: string, newStatus: string) {
-		const idx = workflowSteps.findIndex((s) => s.id === stepId);
-		if (idx !== -1) {
-			workflowSteps[idx] = { ...workflowSteps[idx], status: newStatus };
-		}
 	}
 
 	function getCategoryBadge(category: string) {
@@ -187,6 +120,66 @@
 	function getStatusConfig(status: string) {
 		return statusConfig[status] ?? statusConfig.pending;
 	}
+
+	async function handlePreview(step: FlowStep) {
+		if (!projectId) return;
+		const token = localStorage.token || '';
+		const sourceEntries = entriesByModule[step.inputModule] || [];
+		if (sourceEntries.length === 0) {
+			toast.error('没有可用的源条目，请先在对应模块创建条目');
+			return;
+		}
+		previewingStepId = step.id;
+		try {
+			previewData = await previewFlow(token, {
+				template_id: step.templateId,
+				project_id: projectId,
+				source_entry_ids: sourceEntries.map((e) => e.id)
+			});
+			showPreviewModal = true;
+		} catch (e) {
+			toast.error('预览失败');
+		} finally {
+			previewingStepId = null;
+		}
+	}
+
+	async function handleExecute(step: FlowStep) {
+		if (!projectId) return;
+		const token = localStorage.token || '';
+		const sourceEntries = entriesByModule[step.inputModule] || [];
+		if (sourceEntries.length === 0) {
+			toast.error('没有可用的源条目');
+			return;
+		}
+		executingStepId = step.id;
+		try {
+			await executeFlow(token, {
+				template_id: step.templateId,
+				project_id: projectId,
+				source_entry_ids: sourceEntries.map((e) => e.id),
+				confirmed: true
+			});
+			toast.success(`${step.name} 执行完成`);
+			await loadData();
+		} catch (e) {
+			toast.error('执行失败');
+		} finally {
+			executingStepId = null;
+		}
+	}
+
+	async function handleConfirmPreview() {
+		if (!previewData) return;
+		const step = flowSteps.find((s) => s.id === previewingStepId);
+		if (!step) return;
+		showPreviewModal = false;
+		await handleExecute(step);
+	}
+
+	onMount(() => {
+		loadData();
+	});
 </script>
 
 <svelte:head>
@@ -194,7 +187,6 @@
 </svelte:head>
 
 <div class="p-4 md:p-6 max-w-5xl mx-auto">
-	<!-- Header -->
 	<div class="mb-6">
 		<div class="flex items-center justify-between mb-3">
 			<div class="flex items-center gap-3">
@@ -207,11 +199,10 @@
 				class="px-3 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black text-sm font-medium hover:opacity-90 transition-opacity"
 				onclick={() => (showCreateModal = true)}
 			>
-				创建工作流
+				选择流程
 			</button>
 		</div>
 
-		<!-- Progress bar -->
 		<div class="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
 			<div
 				class="h-full bg-green-500 rounded-full transition-all duration-500 ease-out"
@@ -224,9 +215,11 @@
 		</div>
 	</div>
 
-	<!-- Workflow Steps Board -->
-	{#if workflowSteps.length === 0}
-		<!-- Empty state -->
+	{#if loading}
+		<div class="flex items-center justify-center py-16">
+			<div class="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin"></div>
+		</div>
+	{:else if flowSteps.length === 0}
 		<div class="flex flex-col items-center justify-center py-16 text-center">
 			<div class="w-16 h-16 mb-4 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
 				<svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -234,30 +227,31 @@
 				</svg>
 			</div>
 			<h3 class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">暂无工作流</h3>
-			<p class="text-xs text-gray-500 dark:text-gray-400 mb-4">创建工作流以开始流程协作</p>
+			<p class="text-xs text-gray-500 dark:text-gray-400 mb-4">选择流程模板以开始协作</p>
 			<button
 				class="px-3 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black text-sm font-medium hover:opacity-90 transition-opacity"
 				onclick={() => (showCreateModal = true)}
 			>
-				创建工作流
+				选择流程
 			</button>
 		</div>
 	{:else}
 		<div class="flex flex-col gap-1">
-			{#each workflowSteps as step, index (step.id)}
+			{#each flowSteps as step, index (step.id)}
 				{@const cat = getCategoryBadge(step.category)}
 				{@const stat = getStatusConfig(step.status)}
 				{@const isSelected = selectedStepId === step.id}
-				{@const isLast = index === workflowSteps.length - 1}
+				{@const isLast = index === flowSteps.length - 1}
+				{@const inputEntries = entriesByModule[step.inputModule] || []}
+				{@const outputEntries = entriesByModule[step.outputModule] || []}
+				{@const isExecuting = executingStepId === step.id}
 
-				<!-- Step Card -->
 				<div class="group">
 					<div
 						class="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100/30 dark:border-gray-850/30 transition-all duration-200 {isSelected
 							? 'ring-2 ring-blue-500/30 shadow-md'
 							: 'hover:shadow-sm hover:border-gray-200 dark:hover:border-gray-750'}"
 					>
-						<!-- Step Header (clickable) -->
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div
 							class="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
@@ -271,7 +265,6 @@
 								}
 							}}
 						>
-							<!-- Step number circle -->
 							<div class="flex-shrink-0">
 								<div
 									class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold {step.status ===
@@ -283,7 +276,9 @@
 												? 'bg-red-500 text-white'
 												: 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}"
 								>
-									{#if step.status === 'completed'}
+									{#if isExecuting}
+										<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+									{:else if step.status === 'completed'}
 										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
 											<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
 										</svg>
@@ -293,7 +288,6 @@
 								</div>
 							</div>
 
-							<!-- Step name & description -->
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2 flex-wrap">
 									<span
@@ -319,7 +313,6 @@
 								</p>
 							</div>
 
-							<!-- Status badge & deliverables count -->
 							<div class="flex items-center gap-2 flex-shrink-0">
 								<span
 									class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium {stat.color}"
@@ -328,111 +321,107 @@
 									{stat.label}
 								</span>
 								<span class="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">
-									{step.deliverables.length} 交付物
+									{inputEntries.length}→{outputEntries.length}
 								</span>
-								<!-- Expand chevron -->
 								<svg
-					class="w-4 h-4 text-gray-400 transition-transform duration-200 {isSelected ? 'rotate-180' : ''}"
-					fill="none"
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-				>
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-				</svg>
+									class="w-4 h-4 text-gray-400 transition-transform duration-200 {isSelected ? 'rotate-180' : ''}"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+								</svg>
 							</div>
 						</div>
 
-						<!-- Expanded Details -->
 						{#if isSelected && selectedStep}
 							<div class="px-4 pb-4 border-t border-gray-50 dark:border-gray-800/50">
 								<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
-									<!-- Deliverables -->
-									<div class="md:col-span-2">
-										<h4
-											class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"
-										>
-											交付物
+									<div>
+										<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+											输入 ({step.inputModule})
 										</h4>
 										<div class="flex flex-col gap-1.5">
-											{#each step.deliverables as deliv}
+											{#each inputEntries.slice(0, 5) as entry}
 												<a
-													href="/pm/{projectId}/{deliv.module}"
+													href="/pm/{projectId}/{step.inputModule}"
 													class="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm text-gray-700 dark:text-gray-300 group/link"
 												>
-													<svg
-														class="w-4 h-4 text-gray-400 group-hover/link:text-blue-500 flex-shrink-0"
-														fill="none"
-														stroke="currentColor"
-														viewBox="0 0 24 24"
-													>
-														<path
-															stroke-linecap="round"
-															stroke-linejoin="round"
-															stroke-width="2"
-															d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-														/>
+													<svg class="w-4 h-4 text-gray-400 group-hover/link:text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
 													</svg>
-													{deliv.name}
-													<svg
-														class="w-3 h-3 ml-auto text-gray-300 dark:text-gray-600 group-hover/link:text-blue-500 flex-shrink-0"
-														fill="none"
-														stroke="currentColor"
-														viewBox="0 0 24 24"
-													>
-														<path
-															stroke-linecap="round"
-															stroke-linejoin="round"
-															stroke-width="2"
-															d="M9 5l7 7-7 7"
-														/>
-													</svg>
+													<span class="truncate">{entry.title}</span>
 												</a>
 											{/each}
+											{#if inputEntries.length === 0}
+												<p class="text-xs text-gray-400 dark:text-gray-500 px-3 py-2">暂无输入条目</p>
+											{/if}
+											{#if inputEntries.length > 5}
+												<p class="text-xs text-gray-400 dark:text-gray-500 px-3">+{inputEntries.length - 5} 更多</p>
+											{/if}
 										</div>
 									</div>
 
-									<!-- Next Steps & Actions -->
 									<div>
-										<h4
-											class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"
-										>
-											建议下一步
+										<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+											输出 ({step.outputModule})
 										</h4>
-										<ul class="space-y-1.5 mb-4">
-											{#each step.nextSteps as ns}
-												<li class="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
-													<span
-														class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 mt-1.5 flex-shrink-0"
-													></span>
-													{ns}
-												</li>
+										<div class="flex flex-col gap-1.5">
+											{#each outputEntries.slice(0, 5) as entry}
+												<a
+													href="/pm/{projectId}/{step.outputModule}"
+													class="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-sm text-green-700 dark:text-green-300 group/link"
+												>
+													<svg class="w-4 h-4 text-green-500 group-hover/link:text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+													</svg>
+													<span class="truncate">{entry.title}</span>
+												</a>
 											{/each}
-										</ul>
-
-										<!-- Action buttons -->
-										<div class="flex flex-col gap-2">
-											{#if step.status !== 'completed'}
-												<button
-													class="w-full px-3 py-1.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors"
-													onclick={() => markStepStatus(step.id, 'completed')}
-												>
-													标记完成
-												</button>
+											{#if outputEntries.length === 0}
+												<p class="text-xs text-gray-400 dark:text-gray-500 px-3 py-2">暂无输出条目</p>
 											{/if}
-											{#if step.status !== 'in_progress' && step.status !== 'completed'}
+											{#if outputEntries.length > 5}
+												<p class="text-xs text-gray-400 dark:text-gray-500 px-3">+{outputEntries.length - 5} 更多</p>
+											{/if}
+										</div>
+									</div>
+
+									<div>
+										<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+											操作
+										</h4>
+										<div class="flex flex-col gap-2">
+											{#if step.status !== 'completed' && inputEntries.length > 0}
 												<button
-													class="w-full px-3 py-1.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
-													onclick={() => markStepStatus(step.id, 'in_progress')}
+													class="w-full px-3 py-1.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+													disabled={isExecuting}
+													onclick={() => handlePreview(step)}
 												>
-													标记进行中
+													预览执行
 												</button>
+												<button
+													class="w-full px-3 py-1.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+													disabled={isExecuting}
+													onclick={() => handleExecute(step)}
+												>
+													{isExecuting ? '执行中...' : '立即执行'}
+												</button>
+											{:else if inputEntries.length === 0}
+												<p class="text-xs text-gray-400 dark:text-gray-500">需要先在 {step.inputModule} 模块创建条目</p>
+												<a
+													href="/pm/{projectId}/{step.inputModule}"
+													class="w-full block text-center px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+												>
+													前往创建
+												</a>
 											{/if}
 											{#if step.status === 'completed'}
 												<button
 													class="w-full px-3 py-1.5 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-													onclick={() => markStepStatus(step.id, 'in_progress')}
+													onclick={() => handlePreview(step)}
 												>
-													重新开启
+													重新执行
 												</button>
 											{/if}
 										</div>
@@ -442,7 +431,6 @@
 						{/if}
 					</div>
 
-					<!-- Connector line between steps -->
 					{#if !isLast && !isSelected}
 						<div class="flex justify-center py-0.5">
 							<div class="w-0.5 h-3 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
@@ -454,7 +442,7 @@
 	{/if}
 </div>
 
-<!-- Create Workflow Modal -->
+<!-- Flow Template Selection Modal -->
 {#if showCreateModal}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div
@@ -465,36 +453,38 @@
 	>
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 		<div
-			class="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 shadow-xl w-full max-w-md mx-4 p-6"
+			class="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 shadow-xl w-full max-w-lg mx-4 p-6 max-h-[80vh] overflow-y-auto"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">创建工作流</h2>
+			<h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">选择流程模板</h2>
 			<p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
-				选择工作流模板以快速开始，或创建空白工作流自定义步骤。
+				选择一个流程模板以执行 AI 驱动的工作流。
 			</p>
 
-			<div class="space-y-2 mb-6">
-				<button
-					class="w-full text-left px-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-					onclick={() => {
-						showCreateModal = false;
-					}}
-				>
-					<div class="font-medium text-gray-900 dark:text-white text-sm">产品研发流程</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-						11 个步骤 · 需求收集到复盘全流程
-					</div>
-				</button>
-				<button
-					class="w-full text-left px-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-					onclick={() => {
-						workflowSteps = [];
-						showCreateModal = false;
-					}}
-				>
-					<div class="font-medium text-gray-900 dark:text-white text-sm">空白工作流</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">从零开始自定义步骤</div>
-				</button>
+			<div class="space-y-2 mb-4">
+				{#each flowTemplates as tpl (tpl.id)}
+					<button
+						class="w-full text-left px-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+						onclick={() => {
+							showCreateModal = false;
+							selectedStepId = tpl.id;
+						}}
+					>
+						<div class="flex items-center gap-2">
+							<span class="font-medium text-gray-900 dark:text-white text-sm">{tpl.name}</span>
+							{#if tpl.source === 'custom'}
+								<span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">自定义</span>
+							{/if}
+						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+							{tpl.input_module} → {tpl.output_module} · {tpl.step_count} 步骤
+						</div>
+						<p class="text-xs text-gray-400 dark:text-gray-500 mt-1 line-clamp-2">{tpl.description}</p>
+					</button>
+				{/each}
+				{#if flowTemplates.length === 0}
+					<p class="text-sm text-gray-400 dark:text-gray-500 text-center py-4">暂无可用模板</p>
+				{/if}
 			</div>
 
 			<div class="flex justify-end">
@@ -503,6 +493,76 @@
 					onclick={() => (showCreateModal = false)}
 				>
 					取消
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Flow Preview Modal -->
+{#if showPreviewModal && previewData}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+		role="dialog"
+		aria-modal="true"
+		onclick={() => (showPreviewModal = false)}
+	>
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<div
+			class="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 shadow-xl w-full max-w-lg mx-4 p-6"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+				{previewData.template_name}
+			</h2>
+			<p class="text-sm text-gray-500 dark:text-gray-400 mb-4">预览执行步骤和预期输出</p>
+
+			<div class="space-y-3 mb-4">
+				<div>
+					<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">源条目</h4>
+					{#each previewData.source_entries as src}
+						<div class="text-sm text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 mb-1">
+							{src.title} <span class="text-xs text-gray-400">({src.module_type})</span>
+						</div>
+					{/each}
+				</div>
+
+				<div>
+					<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">执行步骤</h4>
+					{#each previewData.steps as step, i}
+						<div class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-1">
+							<span class="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-500">{i + 1}</span>
+							<span class="font-medium">{step.action}</span>
+							<span class="text-xs text-gray-400">— {step.description}</span>
+						</div>
+					{/each}
+				</div>
+
+				{#if previewData.estimated_outputs.length > 0}
+					<div>
+						<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">预期输出</h4>
+						{#each previewData.estimated_outputs as out}
+							<div class="text-sm text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 mb-1">
+								{out.type}: {out.description} ({out.estimated_count})
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<div class="flex justify-end gap-2">
+				<button
+					class="px-3 py-1.5 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+					onclick={() => (showPreviewModal = false)}
+				>
+					取消
+				</button>
+				<button
+					class="px-3 py-1.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors"
+					onclick={handleConfirmPreview}
+				>
+					确认执行
 				</button>
 			</div>
 		</div>
