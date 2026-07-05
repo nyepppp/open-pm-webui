@@ -10,6 +10,7 @@
 		type CalendarModel,
 		type CalendarEventModel
 	} from '$lib/apis/calendar';
+	import { getEntries, getProjects } from '$lib/apis/pm/index';
 	import CalendarView from '$lib/components/calendar/CalendarView.svelte';
 	import CalendarSidebar from '$lib/components/calendar/CalendarSidebar.svelte';
 	import CalendarEventModal from '$lib/components/calendar/CalendarEventModal.svelte';
@@ -97,6 +98,52 @@
 			events = await getCalendarEvents(localStorage.token, start, end);
 		} catch (err) {
 			toast.error(`${err}`);
+		}
+		// Also load PM schedule/roadmap entries as virtual calendar events
+		try {
+			const token = localStorage.token || '';
+			if (!token) return;
+			const projects = await getProjects(token);
+			const pmEvents: CalendarEventModel[] = [];
+			for (const project of projects) {
+				try {
+					for (const modType of ['schedule', 'roadmap']) {
+						const entries = await getEntries(token, project.id, modType);
+						for (const entry of entries) {
+							const d = entry.data || entry.metadata || {};
+							// Skip entries already synced to calendar
+							if (d.calendarEventId) continue;
+							const startDate = d.startDate ? new Date(d.startDate) : null;
+							const endDate = d.endDate ? new Date(d.endDate) : null;
+							if (!startDate) continue;
+							pmEvents.push({
+								id: `pm-${entry.id}`,
+								calendar_id: `pm-${modType}`,
+								user_id: '',
+								title: `[${project.name}] ${entry.title}`,
+								description: `${modType === 'roadmap' ? '路线图' : '排期'}: ${entry.title}`,
+								start_at: Math.floor(startDate.getTime() / 1000),
+								end_at: Math.floor((endDate || new Date(startDate.getTime() + 86400000)).getTime() / 1000),
+								all_day: true,
+								rrule: null,
+								color: modType === 'roadmap' ? '#8b5cf6' : '#3b82f6',
+								location: null,
+								data: null,
+								meta: { pm_entry_id: entry.id, project_id: project.id, module_type: modType },
+								is_cancelled: false,
+								attendees: [],
+								created_at: Math.floor(Date.now() / 1000),
+								updated_at: Math.floor(Date.now() / 1000)
+							});
+						}
+					}
+				} catch (err) {
+					console.warn('[Calendar] Failed to load PM entries for project', project.id, err);
+				}
+			}
+			events = [...events, ...pmEvents];
+		} catch (err) {
+			console.warn('[Calendar] Failed to load PM projects', err);
 		}
 	}
 
