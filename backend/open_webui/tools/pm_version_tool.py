@@ -40,12 +40,18 @@ class Tools:
             async with aiohttp.ClientSession() as session:
                 if method.upper() == "GET":
                     async with session.get(url, headers=headers, params=params) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "POST":
                     async with session.post(url, headers=headers, json=data) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "DELETE":
                     async with session.delete(url, headers=headers) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 else:
                     return {"error": f"Unsupported HTTP method: {method}"}
