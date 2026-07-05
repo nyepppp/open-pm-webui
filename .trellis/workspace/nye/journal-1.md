@@ -402,3 +402,36 @@ Implemented prototype annotation linking (PMAnnotationPanel rewrite + PMAnnotati
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Merge product-architecture and parameter into unified architecture page
+
+**Date**: 2026-07-06
+**Task**: Merge product-architecture and parameter into unified architecture page
+**Branch**: `main`
+
+### Summary
+
+Implemented unified /pm/architecture page with tab switching between mindmap and params. Created ModuleFeatureTree and ParameterTable components. Added aggregated tree from parameter entries + manual architecture nodes. Wired cross-tab navigation, responsive layout, and manual node CRUD. Updated types, stores, module fields, and component spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d1d35e58` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
