@@ -1609,7 +1609,6 @@
 												return allNodes;
 											})() as MindMapNode[]}
 							onChange={async (updatedNodes: MindMapNode[]) => {
-								// Map nodes back to their source entries by matching node IDs
 								const nodeToEntry = new Map<string, string>();
 								for (const entry of filteredEntries) {
 									const entryNodes: MindMapNode[] = (entry.data || entry.metadata || {}).nodes || [];
@@ -1617,7 +1616,6 @@
 										nodeToEntry.set(n.id, entry.id);
 									}
 								}
-								// Group updated nodes by entry
 								const entryNodesMap = new Map<string, MindMapNode[]>();
 								for (const node of updatedNodes) {
 									const eid = nodeToEntry.get(node.id);
@@ -1626,7 +1624,6 @@
 										entryNodesMap.get(eid)!.push(node);
 									}
 								}
-								// Update each entry's nodes
 								const token = localStorage.token || '';
 								for (const [entryId, nodes] of entryNodesMap) {
 									const entry = filteredEntries.find(e => e.id === entryId);
@@ -1642,6 +1639,9 @@
 								await loadEntries();
 							}}
 							readonly={false}
+							projectId={projectId}
+							versions={$versionList}
+							onSync={() => loadEntries()}
 						/>
 					</div>
 				{/if}
@@ -2170,7 +2170,10 @@
 									editingEntry = { ...editingEntry, data: d };
 								}}
 								readonly={false}
-							/>
+							projectId={projectId}
+							versions={$versionList}
+							onSync={() => loadEntries()}
+						/>
 						</div>
 					</div>
 				{:else if isFlowchartView && editingEntry}

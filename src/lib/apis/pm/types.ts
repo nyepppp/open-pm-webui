@@ -63,6 +63,7 @@ export interface ModuleEntry {
 	moduleType: ModuleType;
 	title: string;
 	content?: string;
+	data?: Record<string, unknown>;
 	metadata?: Record<string, unknown>;
 	versionId?: string;
 	status: ModuleStatus;
@@ -273,6 +274,11 @@ export interface MindMapNode {
 		icon?: string;
 		progress?: number;
 		status?: 'planned' | 'in_progress' | 'completed' | 'delayed';
+		moduleType?: string;
+		entryId?: string;
+		versionId?: string;
+		priority?: string;
+		entryCount?: number;
 	};
 	moduleRef?: string | null;
 	createdAt: number;
@@ -316,6 +322,12 @@ export interface EntryAnnotation {
 	createdBy: string;
 	createdAt: number;
 	updatedAt: number;
+	elementRef?: {
+		componentName?: string;
+		selector?: string;
+	};
+	linkedEntries?: string[];
+	boundary?: string;
 }
 
 // ============================================================================

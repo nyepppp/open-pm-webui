@@ -878,6 +878,18 @@ FLOW_TEMPLATES = {
             {'action': 'execute_flow', 'template': 'parameter_to_testcase', 'description': '参数→测试用例'},
         ],
     },
+    'idea_to_prd': {
+        'id': 'idea_to_prd',
+        'name': 'Idea → PRD',
+        'description': '从创意出发，经过需求分析和多角色评审，生成PRD文档',
+        'input_module': 'requirement',
+        'output_module': 'prd',
+        'steps': [
+            {'action': 'analyze_requirements', 'description': 'AI分析需求分类、优先级和冲突', 'skill': 'requirement-analysis'},
+            {'action': 'review_requirements', 'description': '多角色评审需求完整性', 'skill': 'requirement-review'},
+            {'action': 'generate_prd', 'description': '根据评审结果生成PRD文档', 'skill': 'prd-generation'},
+        ],
+    },
 }
 
 
@@ -1332,13 +1344,136 @@ async def _flow_full_chain(
     }
 
 
-# Flow execution dispatch
+async def _flow_idea_to_prd(
+    source_entry_ids: list[str], project_id: str, user, request: Request, db: AsyncSession,
+) -> dict:
+    """Flow: Idea → Requirement Analysis → Multi-role Review → PRD Generation."""
+    from open_webui.pm.skills.requirement_analysis import RequirementAnalysisSkill
+    from open_webui.pm.skills.requirement_review import RequirementReviewSkill
+    from open_webui.pm.skills.prd_generation import PRDGenerationSkill
+
+    step_results = []
+    all_entries = []
+    all_relations = []
+
+    # 1. Fetch source requirement entries
+    source_entries = []
+    for eid in source_entry_ids:
+        entry = await PMEntries.get_entry_by_id(eid, db=db)
+        if entry:
+            source_entries.append(entry)
+
+    if not source_entries:
+        return {'created_entries': [], 'created_relations': [], 'step_results': [], 'error': 'No source entries found'}
+
+    req_summary = '\n'.join([f'- {e.title}: {(e.content or "")[:300]}' for e in source_entries])
+    combined_titles = ', '.join([e.title for e in source_entries])
+
+    # 2. Step 1: Requirement Analysis
+    analysis_skill = RequirementAnalysisSkill()
+    analysis_msg = analysis_skill.build_user_message(
+        user_message=f'请分析以下需求：\n\n{req_summary}',
+        project_id=project_id,
+    )
+    analysis_response = await _call_llm(request, user, analysis_skill.system_prompt, analysis_msg)
+    analysis_content = analysis_response or ''
+
+    # Create analysis entry
+    analysis_entry = await _create_entry_with_entity(
+        user=user, project_id=project_id, module_type='requirement',
+        title=f'需求分析 - {combined_titles}', content=analysis_content,
+        data={'source': 'ai_flow', 'flow_template': 'idea_to_prd', 'step': 'analysis'},
+        db=db,
+    )
+    if analysis_entry:
+        all_entries.append(PMEntryModel.model_validate(analysis_entry).model_dump() if isinstance(analysis_entry, PMEntry) else analysis_entry)
+        # Derives from source entries
+        for src_entry in source_entries:
+            src_entity_id = await _find_entity_by_entry_id(src_entry.id, db)
+            tgt_entity_id = await _find_entity_by_entry_id(analysis_entry.id, db)
+            if src_entity_id and tgt_entity_id:
+                relation = await _create_derives_relation(user, project_id, src_entity_id, tgt_entity_id, db)
+                if relation:
+                    all_relations.append(relation)
+
+    step_results.append({'action': 'analyze_requirements', 'status': 'completed', 'entry_id': analysis_entry.id if analysis_entry else None})
+
+    # 3. Step 2: Multi-role Requirement Review
+    review_skill = RequirementReviewSkill()
+    review_msg = review_skill.build_user_message(
+        user_message=f'请评审以下需求（含分析结果）：\n\n原始需求：\n{req_summary}\n\n分析结果：\n{analysis_content[:500]}',
+        project_id=project_id,
+    )
+    review_response = await _call_llm(request, user, review_skill.system_prompt, review_msg)
+    review_content = review_response or ''
+
+    review_entry = await _create_entry_with_entity(
+        user=user, project_id=project_id, module_type='requirement',
+        title=f'需求评审 - {combined_titles}', content=review_content,
+        data={'source': 'ai_flow', 'flow_template': 'idea_to_prd', 'step': 'review'},
+        db=db,
+    )
+    if review_entry:
+        all_entries.append(PMEntryModel.model_validate(review_entry).model_dump() if isinstance(review_entry, PMEntry) else review_entry)
+        if analysis_entry:
+            src_entity_id = await _find_entity_by_entry_id(analysis_entry.id, db)
+            tgt_entity_id = await _find_entity_by_entry_id(review_entry.id, db)
+            if src_entity_id and tgt_entity_id:
+                relation = await _create_derives_relation(user, project_id, src_entity_id, tgt_entity_id, db)
+                if relation:
+                    all_relations.append(relation)
+
+    step_results.append({'action': 'review_requirements', 'status': 'completed', 'entry_id': review_entry.id if review_entry else None})
+
+    # 4. Step 3: PRD Generation (using review results)
+    prd_skill = PRDGenerationSkill()
+    prd_msg = prd_skill.build_user_message(
+        user_message=f'请根据以下需求和评审结果生成PRD：\n\n原始需求：\n{req_summary}\n\n评审结果：\n{review_content[:500]}',
+        project_id=project_id,
+    )
+    prd_response = await _call_llm(request, user, prd_skill.system_prompt, prd_msg)
+    prd_content = prd_response or ''
+
+    prd_title = f'PRD - {combined_titles}'
+    prd_data = None
+    if prd_response:
+        parsed = _extract_json(prd_response, expect_list=False)
+        if parsed and isinstance(parsed, dict):
+            prd_title = parsed.get('title', prd_title)
+            prd_content = parsed.get('content', prd_response)
+            prd_data = parsed
+
+    prd_entry = await _create_entry_with_entity(
+        user=user, project_id=project_id, module_type='prd',
+        title=prd_title, content=prd_content, data=prd_data,
+        db=db,
+    )
+    if prd_entry:
+        all_entries.append(PMEntryModel.model_validate(prd_entry).model_dump() if isinstance(prd_entry, PMEntry) else prd_entry)
+        # Derives from source entries and review
+        for src_entry in source_entries:
+            src_entity_id = await _find_entity_by_entry_id(src_entry.id, db)
+            tgt_entity_id = await _find_entity_by_entry_id(prd_entry.id, db)
+            if src_entity_id and tgt_entity_id:
+                relation = await _create_derives_relation(user, project_id, src_entity_id, tgt_entity_id, db)
+                if relation:
+                    all_relations.append(relation)
+
+    step_results.append({'action': 'generate_prd', 'status': 'completed', 'entry_id': prd_entry.id if prd_entry else None})
+
+    return {
+        'created_entries': all_entries,
+        'created_relations': all_relations,
+        'step_results': step_results,
+        'prd_entry_id': prd_entry.id if prd_entry else None,
+    }
 FLOW_EXECUTORS = {
     'requirement_to_parameter': _flow_requirement_to_parameter,
     'requirement_to_prd': _flow_requirement_to_prd,
     'prd_to_parameter': _flow_prd_to_parameter,
     'parameter_to_testcase': _flow_parameter_to_testcase,
     'full_chain': _flow_full_chain,
+    'idea_to_prd': _flow_idea_to_prd,
 }
 
 
@@ -1543,6 +1678,259 @@ async def create_flow_template(
         'description': form_data.description,
         'entry_id': entry.id,
         'message': '流转模板创建成功',
+    }
+
+
+############################
+# Architecture Auto-Extract & Sync
+############################
+
+
+class ArchitectureAutoExtractRequest(BaseModel):
+    version_id: Optional[str] = None
+
+
+class ArchitectureSyncRequest(BaseModel):
+    version_id: Optional[str] = None
+    apply: bool = False
+
+
+def _build_architecture_nodes(entries: list[PMEntry], project_id: str) -> list[dict]:
+    """Build architecture MindMapNode tree from project entries grouped by module_type."""
+    import time
+    import uuid
+
+    by_module: dict[str, list[PMEntry]] = {}
+    for entry in entries:
+        mt = entry.module_type or 'unknown'
+        if mt not in by_module:
+            by_module[mt] = []
+        by_module[mt].append(entry)
+
+    nodes: list[dict] = []
+    root_id = str(uuid.uuid4())
+    now = int(time.time() * 1000)
+
+    nodes.append({
+        'id': root_id,
+        'projectId': project_id,
+        'parentId': None,
+        'label': 'Product Architecture',
+        'type': 'root',
+        'position': {'x': 0, 'y': 0},
+        'metadata': {},
+        'createdAt': now,
+        'updatedAt': now,
+    })
+
+    branch_x = 0
+    for module_type, module_entries in by_module.items():
+        branch_id = str(uuid.uuid4())
+        nodes.append({
+            'id': branch_id,
+            'projectId': project_id,
+            'parentId': root_id,
+            'label': module_type,
+            'type': 'branch',
+            'position': {'x': branch_x, 'y': 200},
+            'metadata': {'moduleType': module_type, 'entryCount': len(module_entries)},
+            'createdAt': now,
+            'updatedAt': now,
+        })
+
+        leaf_x = branch_x
+        for entry in module_entries:
+            leaf_id = str(uuid.uuid4())
+            version_id = None
+            if entry.data and isinstance(entry.data, dict):
+                version_id = entry.data.get('versionId')
+
+            nodes.append({
+                'id': leaf_id,
+                'projectId': project_id,
+                'parentId': branch_id,
+                'label': entry.title or 'Untitled',
+                'type': 'leaf',
+                'position': {'x': leaf_x, 'y': 400},
+                'metadata': {
+                    'moduleType': module_type,
+                    'entryId': entry.id,
+                    'status': entry.status,
+                    'priority': entry.priority,
+                    **({'versionId': version_id} if version_id else {}),
+                },
+                'moduleRef': entry.id,
+                'createdAt': now,
+                'updatedAt': now,
+            })
+            leaf_x += 200
+
+        branch_x += 400
+
+    return nodes
+
+
+def _diff_architecture_nodes(old_nodes: list[dict], new_nodes: list[dict]) -> dict:
+    """Compare old and new architecture nodes, returning added/removed/modified."""
+    old_by_label = {n['label']: n for n in old_nodes if n.get('type') == 'leaf'}
+    new_by_label = {n['label']: n for n in new_nodes if n.get('type') == 'leaf'}
+
+    old_labels = set(old_by_label.keys())
+    new_labels = set(new_by_label.keys())
+
+    added = [new_by_label[l] for l in new_labels - old_labels]
+    removed = [old_by_label[l] for l in old_labels - new_labels]
+    modified = []
+    for label in old_labels & new_labels:
+        old_n = old_by_label[label]
+        new_n = new_by_label[label]
+        if old_n.get('metadata', {}).get('moduleType') != new_n.get('metadata', {}).get('moduleType'):
+            modified.append(new_n)
+        elif old_n.get('moduleRef') != new_n.get('moduleRef'):
+            modified.append(new_n)
+
+    return {'added': added, 'removed': removed, 'modified': modified}
+
+
+@router.post('/projects/{project_id}/architecture/auto-extract')
+async def auto_extract_architecture(
+    project_id: str,
+    form_data: ArchitectureAutoExtractRequest,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    project = await PMProjects.get_project_by_id(project_id, db=db)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
+    if project.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+
+    query = select(PMEntry).where(
+        PMEntry.project_id == project_id,
+    ).order_by(PMEntry.module_type, PMEntry.updated_at.desc())
+
+    if form_data.version_id:
+        from open_webui.models.pm import PMEntryVersion
+        ver_query = select(PMEntryVersion.entry_id).where(
+            PMEntryVersion.project_version_id == form_data.version_id,
+        )
+        ver_result = await db.execute(ver_query)
+        entry_ids = [r for r in ver_result.scalars().all()]
+        if entry_ids:
+            query = query.where(PMEntry.id.in_(entry_ids))
+
+    result = await db.execute(query)
+    entries = result.scalars().all()
+
+    nodes = _build_architecture_nodes(list(entries), project_id)
+
+    existing_arch = await _create_entry_with_entity(
+        user=user,
+        project_id=project_id,
+        module_type='product-architecture',
+        title='Product Architecture (Auto-Extracted)',
+        content=json.dumps({'nodes': nodes}, ensure_ascii=False),
+        data={
+            'autoExtracted': True,
+            'nodeCount': len(nodes),
+            'versionId': form_data.version_id,
+        },
+        db=db,
+    )
+
+    return {
+        'entry_id': existing_arch.id if existing_arch else None,
+        'nodes': nodes,
+        'auto_extracted': True,
+    }
+
+
+@router.post('/projects/{project_id}/architecture/sync')
+async def sync_architecture(
+    project_id: str,
+    form_data: ArchitectureSyncRequest,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    project = await PMProjects.get_project_by_id(project_id, db=db)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
+    if project.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+
+    query = select(PMEntry).where(
+        PMEntry.project_id == project_id,
+        PMEntry.module_type == 'product-architecture',
+    ).order_by(PMEntry.updated_at.desc())
+    result = await db.execute(query)
+    existing_entries = result.scalars().all()
+
+    old_nodes = []
+    existing_entry = existing_entries[0] if existing_entries else None
+    if existing_entry and existing_entry.data:
+        old_nodes = (existing_entry.data or {}).get('nodes', [])
+    elif existing_entry and existing_entry.content:
+        parsed = _extract_json(existing_entry.content, expect_list=False)
+        if parsed and isinstance(parsed, dict):
+            old_nodes = parsed.get('nodes', [])
+
+    entries_query = select(PMEntry).where(
+        PMEntry.project_id == project_id,
+    ).order_by(PMEntry.module_type, PMEntry.updated_at.desc())
+
+    if form_data.version_id:
+        from open_webui.models.pm import PMEntryVersion
+        ver_query = select(PMEntryVersion.entry_id).where(
+            PMEntryVersion.project_version_id == form_data.version_id,
+        )
+        ver_result = await db.execute(ver_query)
+        entry_ids = [r for r in ver_result.scalars().all()]
+        if entry_ids:
+            entries_query = entries_query.where(PMEntry.id.in_(entry_ids))
+
+    entries_result = await db.execute(entries_query)
+    all_entries = entries_result.scalars().all()
+
+    new_nodes = _build_architecture_nodes(list(all_entries), project_id)
+    diff = _diff_architecture_nodes(old_nodes, new_nodes)
+
+    applied = False
+    entry_id = existing_entry.id if existing_entry else None
+
+    if form_data.apply:
+        if existing_entry:
+            update_data = {
+                'content': json.dumps({'nodes': new_nodes}, ensure_ascii=False),
+                'data': {
+                    'autoExtracted': True,
+                    'nodeCount': len(new_nodes),
+                    'versionId': form_data.version_id,
+                },
+            }
+            await PMEntries.update_entry_by_id(existing_entry.id, update_data, db=db)
+            applied = True
+        else:
+            new_entry = await _create_entry_with_entity(
+                user=user,
+                project_id=project_id,
+                module_type='product-architecture',
+                title='Product Architecture (Auto-Extracted)',
+                content=json.dumps({'nodes': new_nodes}, ensure_ascii=False),
+                data={
+                    'autoExtracted': True,
+                    'nodeCount': len(new_nodes),
+                    'versionId': form_data.version_id,
+                },
+                db=db,
+            )
+            entry_id = new_entry.id if new_entry else None
+            applied = True
+
+    return {
+        'entry_id': entry_id,
+        'nodes': new_nodes if applied else old_nodes,
+        'diff': diff,
+        'applied': applied,
     }
 
 

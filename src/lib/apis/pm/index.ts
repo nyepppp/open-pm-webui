@@ -328,3 +328,125 @@ export async function agentToolGetEntry(token: string, entryId: string) {
 	if (!response.ok) throw new Error('Failed to get entry via agent');
 	return response.json();
 }
+
+// ============================================================================
+// Flow Engine
+// ============================================================================
+
+export interface FlowTemplate {
+	id: string;
+	name: string;
+	description: string;
+	input_module: string;
+	output_module: string;
+	step_count: number;
+	source: 'builtin' | 'custom';
+	entry_id?: string;
+}
+
+export interface FlowPreview {
+	template_id: string;
+	template_name: string;
+	source_entries: { id: string; title: string; module_type: string }[];
+	steps: { action: string; description: string; status: string }[];
+	estimated_outputs: { type: string; estimated_count: string | number; description: string }[];
+}
+
+export interface FlowExecuteResult {
+	template_id: string;
+	template_name: string;
+	source_entry_ids: string[];
+	status: string;
+	created_entries: unknown[];
+	created_relations: unknown[];
+	step_results: { action: string; status: string; entry_id?: string }[];
+	error?: string;
+}
+
+export async function getFlowTemplates(token: string, projectId?: string) {
+	const query = projectId ? `?project_id=${projectId}` : '';
+	const response = await fetch(`${PM_API_BASE}/flow/templates${query}`, {
+		method: 'GET',
+		headers: getHeaders(token)
+	});
+	if (!response.ok) throw new Error('Failed to fetch flow templates');
+	return response.json() as Promise<{ total: number; templates: FlowTemplate[] }>;
+}
+
+export async function previewFlow(token: string, data: { template_id: string; project_id: string; source_entry_ids: string[] }) {
+	const response = await fetch(`${PM_API_BASE}/flow/preview`, {
+		method: 'POST',
+		headers: getHeaders(token),
+		body: JSON.stringify(data)
+	});
+	if (!response.ok) throw new Error('Failed to preview flow');
+	return response.json() as Promise<FlowPreview>;
+}
+
+export async function executeFlow(token: string, data: { template_id: string; project_id: string; source_entry_ids: string[]; confirmed: boolean }) {
+	const response = await fetch(`${PM_API_BASE}/flow/execute`, {
+		method: 'POST',
+		headers: getHeaders(token),
+		body: JSON.stringify(data)
+	});
+	if (!response.ok) throw new Error('Failed to execute flow');
+	return response.json() as Promise<FlowExecuteResult>;
+}
+
+// ============================================================================
+// Architecture Auto-Extract & Sync
+// ============================================================================
+
+export interface ArchitectureNode {
+	id: string;
+	projectId: string;
+	parentId: string | null;
+	label: string;
+	type: 'root' | 'branch' | 'leaf';
+	position: { x: number; y: number };
+	metadata: Record<string, unknown>;
+	moduleRef?: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export interface ArchitectureExtractResult {
+	entry_id: string;
+	nodes: ArchitectureNode[];
+	auto_extracted: boolean;
+}
+
+export interface ArchitectureSyncDiff {
+	added: ArchitectureNode[];
+	removed: ArchitectureNode[];
+	modified: ArchitectureNode[];
+}
+
+export interface ArchitectureSyncResult {
+	entry_id: string;
+	nodes: ArchitectureNode[];
+	diff: ArchitectureSyncDiff;
+	applied: boolean;
+}
+
+export async function autoExtractArchitecture(token: string, projectId: string, versionId?: string) {
+	const data: Record<string, unknown> = {};
+	if (versionId) data.version_id = versionId;
+	const response = await fetch(`${PM_API_BASE}/projects/${projectId}/architecture/auto-extract`, {
+		method: 'POST',
+		headers: getHeaders(token),
+		body: JSON.stringify(data)
+	});
+	if (!response.ok) throw new Error('Failed to auto-extract architecture');
+	return response.json() as Promise<ArchitectureExtractResult>;
+}
+
+export async function syncArchitecture(token: string, projectId: string, data: { apply?: boolean; version_id?: string }) {
+	const response = await fetch(`${PM_API_BASE}/projects/${projectId}/architecture/sync`, {
+		method: 'POST',
+		headers: getHeaders(token),
+		body: JSON.stringify(data)
+	});
+	if (!response.ok) throw new Error('Failed to sync architecture');
+	return response.json() as Promise<ArchitectureSyncResult>;
+}
