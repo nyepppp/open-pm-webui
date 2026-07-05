@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
 	import { getEntries, createEntry, deleteEntry, updateEntry, getEntry } from '$lib/apis/pm/index';
@@ -274,10 +274,6 @@
 			console.error('[PM] loadEntries failed:', msg, { projectId, moduleType });
 		} finally {
 			isLoading = false;
-			// Auto-open mindmap for product-architecture
-			if (moduleType === 'product-architecture' && entries.length === 1) {
-				openEntryEditor(entries[0].id);
-			}
 		}
 	}
 	let _loadAbort: AbortController | null = null;
@@ -333,8 +329,8 @@
 			}
 			const created = await createEntry(token, projectId, data);
 			resetForm(); await loadEntries(); toast.success('创建成功');
-			// Auto-open editor for competitor after create
-			if (moduleType === 'competitor' && created?.id) {
+			// Auto-open editor for competitor or product-architecture after create
+			if ((moduleType === 'competitor' || moduleType === 'product-architecture') && created?.id) {
 				openEntryEditor(created.id);
 			}
 		} catch (e: any) { toast.error(e.message || '创建失败'); }
@@ -445,7 +441,15 @@
 
 	let versionOptions = $derived(() => {
 		const vns = new Set<string>();
-		entries.forEach(e => { const vn = e.currentVersionNumber || getEntryData(e, 'versionNumber'); if (vn) vns.add(vn); });
+		entries.forEach(e => {
+			let vn = e.currentVersionNumber || getEntryData(e, 'versionNumber');
+			// If vn looks like a UUID, resolve it to a readable version number
+			if (vn && /^[0-9a-f]{8}-/i.test(String(vn))) {
+				const matched = $versionList.find((v: any) => v.id === vn);
+				vn = matched ? (matched.versionNumber || matched.version_number) : null;
+			}
+			if (vn) vns.add(vn);
+		});
 		return [...vns].sort();
 	});
 
@@ -614,7 +618,9 @@
 	async function openEntryEditor(entryId: string) {
 		try {
 			const token = localStorage.token || '';
+			if (!token) { toast.error('未登录，请先登录'); return; }
 			editingEntry = await getEntry(token, entryId);
+			if (!editingEntry) { toast.error('加载条目失败：返回数据为空'); return; }
 			editingDocTitle = editingEntry.title;
 			editingDocStatus = editingEntry.status || 'draft';
 			editingVersionId = getEntryData(editingEntry, 'versionId') || editingEntry.versionId || '';
@@ -810,8 +816,10 @@
 				projectVersionId: currentVer?.id
 			});
 			toast.success('新版本已创建');
+			await loadEntries();
 		} catch (e: any) {
 			console.warn('[PM] version creation failed:', e?.message);
+			toast.error(e?.message || '创建新版本失败');
 		}
 	}
 
@@ -827,7 +835,7 @@
 			if (!defaultCal) { toast.error('没有可用的日历，请先创建日历'); return; }
 			const startDate = d.startDate ? new Date(d.startDate) : null;
 			const endDate = d.endDate ? new Date(d.endDate) : (startDate ? new Date(startDate.getTime() + 86400000) : null);
-			if (!startDate) { toast.info('该条目没有日期，无法同步到日程'); return; }
+			if (!startDate) { toast.info('请先设置开始日期，才能同步到日程'); return; }
 			const nodeType = d.nodeType || 'feature';
 			const nodeStatus = d.nodeStatus || 'planned';
 			const typeLabel = nodeTypeMap[nodeType]?.l || nodeType;
@@ -1018,7 +1026,7 @@
 							<div class="ml-1 text-xs">模板管理</div>
 						</button>
 					{:else}
-						<button class="px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center" onclick={() => { showNewForm = true; }}>
+						<button class="px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center" onclick={async () => { showNewForm = true; await tick(); document.getElementById('new-form-container')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}>
 							<svg class="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
 							<div class="ml-1 text-xs">新建</div>
 						</button>
@@ -1068,8 +1076,8 @@
 		</div>
 
 		{#if showNewForm}
-			<div class="px-3.5 pb-3">
-				<div class="border border-gray-200 dark:border-gray-700 rounded-2xl p-3 space-y-2">
+			<div id="new-form-container" class="px-3.5 pb-3">
+				<div class="border border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10 rounded-2xl p-3 space-y-2 shadow-sm">
 					{#if moduleType === 'faq'}
 						<PMFormTextarea label="问题" placeholder="问题" rows="2" bind:value={newTitle} />
 						<PMFormTextarea label="答案" placeholder="答案" rows="3" bind:value={newFormData.answer} />
@@ -1129,13 +1137,23 @@
 						<div class="flex gap-2">
 							<PMFormSelect
 								placeholder="关联需求（可选）"
-								options={requirementEntries.map((req: any) => ({ value: req.id, label: req.title }))}
+								options={requirementEntries.map((req: any) => {
+									const reqVid = req.versionId || getEntryData(req, 'versionId') || (req.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(req.currentVersionNumber)) ? req.currentVersionNumber : '');
+									const reqVersion = reqVid ? $versionList.find((v: any) => v.id === reqVid) : null;
+									const reqVn = reqVersion ? (reqVersion.versionNumber || reqVersion.version_number) : '';
+									return { value: req.id, label: `${req.title}${reqVn ? ' · ' + reqVn : ''} (${req.id.slice(0, 6)})` };
+								})}
 								bind:value={newFormData.relatedRequirements}
 								class="flex-1"
 							/>
 							<PMFormSelect
 								placeholder="关联参数（可选）"
-								options={parameterEntries.map((param: any) => ({ value: param.id, label: param.title }))}
+								options={parameterEntries.map((param: any) => {
+									const paramVid = param.versionId || getEntryData(param, 'versionId') || (param.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(param.currentVersionNumber)) ? param.currentVersionNumber : '');
+									const paramVersion = paramVid ? $versionList.find((v: any) => v.id === paramVid) : null;
+									const paramVn = paramVersion ? (paramVersion.versionNumber || paramVersion.version_number) : '';
+									return { value: param.id, label: `${param.title}${paramVn ? ' · ' + paramVn : ''} (${param.id.slice(0, 6)})` };
+								})}
 								bind:value={newFormData.relatedParameters}
 								class="flex-1"
 							/>
@@ -1233,13 +1251,23 @@
 						<div class="flex gap-2">
 							<PMFormSelect
 								placeholder="关联需求（可选）"
-								options={requirementEntries.map((req: any) => ({ value: req.id, label: `[${prioMap[req.priority]?.l || 'P2'}] ${req.title} (${req.id.slice(0, 6)})` }))}
+								options={requirementEntries.map((req: any) => {
+									const reqVid = req.versionId || getEntryData(req, 'versionId') || (req.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(req.currentVersionNumber)) ? req.currentVersionNumber : '');
+									const reqVersion = reqVid ? $versionList.find((v: any) => v.id === reqVid) : null;
+									const reqVn = reqVersion ? (reqVersion.versionNumber || reqVersion.version_number) : '';
+									return { value: req.id, label: `[${prioMap[req.priority]?.l || 'P2'}] ${req.title}${reqVn ? ' · ' + reqVn : ''} (${req.id.slice(0, 6)})` };
+								})}
 								bind:value={newRequirementId}
 								class="flex-1"
 							/>
 							<PMFormSelect
 								placeholder="关联参数（可选）"
-								options={parameterEntries.map((param: any) => ({ value: param.id, label: `${param.title} (${param.id.slice(0, 6)})` }))}
+								options={parameterEntries.map((param: any) => {
+									const paramVid = param.versionId || getEntryData(param, 'versionId') || (param.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(param.currentVersionNumber)) ? param.currentVersionNumber : '');
+									const paramVersion = paramVid ? $versionList.find((v: any) => v.id === paramVid) : null;
+									const paramVn = paramVersion ? (paramVersion.versionNumber || paramVersion.version_number) : '';
+									return { value: param.id, label: `${param.title}${paramVn ? ' · ' + paramVn : ''} (${param.id.slice(0, 6)})` };
+								})}
 								bind:value={newParameterId}
 								class="flex-1"
 							/>
@@ -1311,10 +1339,10 @@
 			</div>
 		{:else if isLoading}
 			<div class="flex items-center justify-center py-12"><div class="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div></div>
-		{:else if filteredEntries.length === 0}
+		{:else if filteredEntries.length === 0 && !showNewForm}
 			<div class="py-12 text-center">
 				<p class="text-sm text-gray-500 dark:text-gray-400">{query ? '没有找到匹配的条目' : `还没有${config.name}条目`}</p>
-				{#if !query && !showNewForm}<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { if (moduleType === 'spec') { handleSpecCreate(); } else { showNewForm = true; } }}>创建第一个条目</button>{/if}
+				{#if !query}<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={async () => { if (moduleType === 'spec') { handleSpecCreate(); } else { showNewForm = true; await tick(); document.getElementById('new-form-container')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } }}>创建第一个条目</button>{/if}
 			</div>
 		{:else if isTableView && (moduleType === 'roadmap' || moduleType === 'schedule') && roadmapView === 'gantt'}
 			{#key filteredEntries}
@@ -1595,14 +1623,12 @@
 						<p class="text-sm text-red-500 dark:text-red-400">加载架构数据失败：{loadError}</p>
 						<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={loadEntries}>重试</button>
 					</div>
-				{:else if filteredEntries.length === 0}
+				{:else if filteredEntries.length === 0 && !showNewForm}
 					<div class="py-12 text-center">
 						<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg>
 						<p class="text-sm text-gray-500 dark:text-gray-400">还没有产品架构条目</p>
 						<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">创建一个架构条目后，可以在思维导图中编辑节点</p>
-						{#if !showNewForm}
-							<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个架构条目</button>
-						{/if}
+						<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个架构条目</button>
 					</div>
 				{:else}
 					<div class="h-[600px]">
@@ -1705,14 +1731,12 @@
 				<p class="text-sm text-red-500 dark:text-red-400">加载流程图数据失败：{loadError}</p>
 				<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={loadEntries}>重试</button>
 			</div>
-		{:else if filteredEntries.length === 0}
+		{:else if filteredEntries.length === 0 && !showNewForm}
 			<div class="py-12 text-center">
 				<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
 				<p class="text-sm text-gray-500 dark:text-gray-400">还没有流程图条目</p>
 				<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">创建一个流程图后，可以在编辑器中设计节点和连线</p>
-				{#if !showNewForm}
-					<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个流程图</button>
-				{/if}
+				<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showNewForm = true; }}>创建第一个流程图</button>
 			</div>
 		{:else}
 			<div class="px-2.5 py-1 gap-1.5 flex flex-col">{#each filteredEntries as entry (entry.id)}
