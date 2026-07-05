@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { moduleCategories, expandedCategories, toggleCategory, setActiveModule, sidebarCollapsed, type ModuleCategory } from '$lib/stores/pm/moduleStore';
-	import type { ModuleType } from '$lib/apis/pm/types';
+	import { moduleCategories, expandedCategories, toggleCategory, setActiveModule, sidebarCollapsed } from '$lib/stores/pm/moduleStore';
+	import type { ModuleType, ModuleCategory } from '$lib/apis/pm/types';
 
 	// Props
 	interface Props {

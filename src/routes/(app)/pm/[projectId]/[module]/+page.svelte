@@ -38,6 +38,11 @@
 	let projectId = $derived($page.params.projectId);
 	let moduleType = $derived($page.params.module as ModuleType);
 
+	// Redirect old parameter/product-architecture routes to new unified architecture page
+	if (moduleType === 'parameter' || moduleType === 'product-architecture') {
+		goto(`/pm/${projectId}/architecture`);
+	}
+
 	type EditorType = 'rich' | 'table' | 'form' | 'mindmap' | 'flowchart' | 'competitor';
 	interface ModuleConf { name: string; editorType: EditorType; tableColumns?: { key: string; label: string; width?: string }[]; formFields?: { key: string; label: string; type: 'text' | 'textarea' | 'select' }[] }
 

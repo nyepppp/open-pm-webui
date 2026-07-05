@@ -135,6 +135,7 @@ export const moduleFieldRegistry: Record<string, FieldConfig[]> = {
 	'product-architecture': productArchitectureFields,
 	'requirement-boundary': requirementBoundaryFields,
 	spec: specFields,
+	architecture: [...productArchitectureFields, ...parameterFields],
 };
 
 // ============================================================================
@@ -256,6 +257,13 @@ export const moduleEditorConfig: Record<string, ModuleEditorConfig> = {
 		label: 'SPEC规范',
 		icon: 'document',
 		category: 'review'
+	},
+	architecture: {
+		editorType: 'mixed',
+		fields: [...productArchitectureFields, ...parameterFields],
+		label: '产品架构',
+		icon: 'diagram',
+		category: 'design'
 	}
 };
 
