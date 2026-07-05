@@ -158,9 +158,13 @@
 			const version = res?.version ?? null;
 
 			if (version !== null || deploymentId !== null) {
+				// Only refresh if we already have a version/deploymentId set (not initial load)
+				const hasVersion = $WEBUI_VERSION !== null && $WEBUI_VERSION !== undefined;
+				const hasDeploymentId = $WEBUI_DEPLOYMENT_ID !== null && $WEBUI_DEPLOYMENT_ID !== undefined;
+
 				if (
-					($WEBUI_VERSION !== null && version !== $WEBUI_VERSION) ||
-					($WEBUI_DEPLOYMENT_ID !== null && deploymentId !== $WEBUI_DEPLOYMENT_ID)
+					(hasVersion && version !== $WEBUI_VERSION) ||
+					(hasDeploymentId && deploymentId !== $WEBUI_DEPLOYMENT_ID)
 				) {
 					await unregisterServiceWorkers();
 					location.href = location.href;
@@ -774,7 +778,7 @@
 			user.set(null);
 			localStorage.removeItem('token');
 
-			location.href = res?.redirect_url ?? '/auth';
+			goto(res?.redirect_url ?? '/auth');
 		}
 	};
 

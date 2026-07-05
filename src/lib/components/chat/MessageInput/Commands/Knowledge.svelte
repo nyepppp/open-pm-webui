@@ -9,6 +9,7 @@
 	import { folders } from '$lib/stores';
 	import { getFolders } from '$lib/apis/folders';
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
+	import { getProjects, getEntries } from '$lib/apis/pm';
 	import { removeLastWordFromString, isValidHttpUrl, isYoutubeUrl, decodeString } from '$lib/utils';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -67,8 +68,9 @@
 	let folderItems = [];
 	let knowledgeItems = [];
 	let fileItems = [];
+	let pmItems = [];
 
-	$: items = [...folderItems, ...knowledgeItems, ...fileItems];
+	$: items = [...pmItems, ...folderItems, ...knowledgeItems, ...fileItems];
 
 	$: if (query !== undefined) {
 		clearTimeout(searchDebounceTimer);
@@ -82,9 +84,59 @@
 	});
 
 	const getItems = () => {
+		getPMItems();
 		getFolderItems();
 		getKnowledgeItems();
 		getKnowledgeFileItems();
+	};
+
+	const getPMItems = async () => {
+		if (!query) {
+			pmItems = [];
+			return;
+		}
+		try {
+			const token = localStorage.token || '';
+			const projects = await getProjects(token);
+			const matchingProjects = (projects || [])
+				.filter((p) => p.name?.toLowerCase().includes(query.toLowerCase()))
+				.slice(0, 5)
+				.map((p) => ({
+					type: 'pm-project',
+					name: p.name,
+					description: 'PM 项目',
+					id: p.id,
+					projectId: p.id,
+					projectName: p.name
+				}));
+
+			let matchingEntries = [];
+			for (const project of (projects || []).slice(0, 5)) {
+				try {
+					const entries = await getEntries(token, project.id);
+					const filtered = (entries || [])
+						.filter((e) => e.title?.toLowerCase().includes(query.toLowerCase()))
+						.slice(0, 3)
+						.map((e) => ({
+							type: 'pm-entry',
+							name: e.title,
+							description: `${project.name} - PM 条目`,
+							id: e.id,
+							projectId: project.id,
+							projectName: project.name,
+							moduleType: e.moduleType || e.module_type,
+							entryTitle: e.title
+						}));
+					matchingEntries = [...matchingEntries, ...filtered];
+				} catch {
+					/* skip if project entries fail */
+				}
+			}
+
+			pmItems = [...matchingProjects, ...matchingEntries].slice(0, 8);
+		} catch {
+			pmItems = [];
+		}
 	};
 
 	const getFolderItems = async () => {
@@ -143,7 +195,11 @@
 	{#each filteredItems as item, idx}
 		{#if idx === 0 || item?.type !== items[idx - 1]?.type}
 			<div class="px-2 text-xs text-gray-500 py-1">
-				{#if item?.type === 'folder'}
+				{#if item?.type === 'pm-project'}
+					{$i18n.t('PM 项目')}
+				{:else if item?.type === 'pm-entry'}
+					{$i18n.t('PM 条目')}
+				{:else if item?.type === 'folder'}
 					{$i18n.t('Folders')}
 				{:else if item?.type === 'collection'}
 					{$i18n.t('Collections')}
@@ -162,10 +218,17 @@
 				type="button"
 				on:click={() => {
 					console.log(item);
-					onSelect({
-						type: 'knowledge',
-						data: item
-					});
+					if (item?.type === 'pm-project' || item?.type === 'pm-entry') {
+						onSelect({
+							type: 'pm',
+							data: item
+						});
+					} else {
+						onSelect({
+							type: 'knowledge',
+							data: item
+						});
+					}
 				}}
 				on:mousemove={() => {
 					selectedIdx = idx;
@@ -183,7 +246,11 @@
 									: ''}
 						placement="top"
 					>
-						{#if item?.type === 'collection'}
+						{#if item?.type === 'pm-project'}
+							<Database className="size-4" style="color: #6366f1;" />
+						{:else if item?.type === 'pm-entry'}
+							<DocumentPage className="size-4" style="color: #6366f1;" />
+						{:else if item?.type === 'collection'}
 							<Database className="size-4" />
 						{:else if item?.type === 'folder'}
 							<Folder className="size-4" />

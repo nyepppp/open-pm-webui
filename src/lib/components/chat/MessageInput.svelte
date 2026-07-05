@@ -141,6 +141,7 @@
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let pmWorkbenchEnabled = false;
 
 	export let pendingOAuthTools = [];
 
@@ -539,6 +540,10 @@
 			codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
+
+	let showPMWorkbenchButton = false;
+	$: showPMWorkbenchButton =
+		$config?.features?.enable_pm_workbench !== false;
 
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
@@ -1040,6 +1045,25 @@
 									status: 'processed'
 								}
 							];
+						} else if (type === 'pm') {
+							const pmRef = {
+								id: `pm-${data.projectId}${data.id ? '-' + data.id : ''}`,
+								name: data.name,
+								type: data.type === 'pm-project' ? 'pm-project' : 'pm-entry',
+								status: 'processed',
+								url: `/pm/${data.projectId}`,
+								data: {
+									projectId: data.projectId,
+									projectName: data.projectName,
+									entryId: data.id,
+									entryTitle: data.name,
+									moduleType: data.moduleType
+								}
+							};
+							if (files.find((f) => f.id === pmRef.id)) {
+								return;
+							}
+							files = [...files, pmRef];
 						} else {
 							if (files.find((f) => f.url === data || f.name === data)) {
 								return;
@@ -1682,7 +1706,7 @@
 										</button>
 									</InputMenu>
 
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
+									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showPMWorkbenchButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
 											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50"
 										/>
@@ -1693,12 +1717,14 @@
 											{showWebSearchButton}
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
+											{showPMWorkbenchButton}
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
+											bind:pmWorkbenchEnabled
 											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
 											onShowValves={(e) => {
 												const { type, id } = e;
