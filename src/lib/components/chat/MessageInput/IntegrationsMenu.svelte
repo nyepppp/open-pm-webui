@@ -53,6 +53,8 @@
 	export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
+	export let showPMWorkbenchButton = false;
+	export let pmWorkbenchEnabled = false;
 
 	export let onShowValves: Function;
 	export let onClose: Function;
@@ -352,6 +354,41 @@
 								<div class=" shrink-0">
 									<Switch
 										state={codeInterpreterEnabled}
+										on:change={async (e) => {
+											const state = e.detail;
+											await tick();
+										}}
+									/>
+								</div>
+							</button>
+						</Tooltip>
+					{/if}
+
+					{#if showPMWorkbenchButton}
+						<Tooltip content={$i18n.t('Reference PM Workbench content')} placement="top-start">
+							<button
+								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+								aria-pressed={pmWorkbenchEnabled}
+								aria-label={pmWorkbenchEnabled
+									? $i18n.t('Disable PM Workbench')
+									: $i18n.t('Enable PM Workbench')}
+								on:click={() => {
+									pmWorkbenchEnabled = !pmWorkbenchEnabled;
+								}}
+							>
+								<div class="flex-1 truncate">
+									<div class="flex flex-1 gap-2 items-center">
+										<div class="shrink-0">
+											<Database className="size-3.5" strokeWidth="1.75" style="color: #6366f1;" />
+										</div>
+
+										<div class=" truncate">{$i18n.t('PM 工作台')}</div>
+									</div>
+								</div>
+
+								<div class=" shrink-0">
+									<Switch
+										state={pmWorkbenchEnabled}
 										on:change={async (e) => {
 											const state = e.detail;
 											await tick();

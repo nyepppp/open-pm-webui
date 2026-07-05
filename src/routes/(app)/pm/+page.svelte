@@ -3,10 +3,11 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
-	import { getProjects, createProject, deleteProject, updateProject } from '$lib/apis/pm/index';
+	import { getProjects, createProject, deleteProject, updateProject, getVersions } from '$lib/apis/pm/index';
 	import type { Project } from '$lib/apis/pm/types';
 
 	let projects = $state<Project[]>([]);
+	let projectVersionMap = $state<Record<string, string>>({});
 	let isLoading = $state(true);
 	let query = $state('');
 	let showNewForm = $state(false);
@@ -27,8 +28,22 @@
 		try {
 			const token = localStorage.token || '';
 			projects = await getProjects(token);
+			// Load current version for each project
+			const versionEntries = await Promise.all(
+				projects.map(async (p) => {
+					try {
+						const versions = await getVersions(token, p.id);
+						const latest = versions?.[0];
+						return [p.id, latest?.versionNumber || latest?.version_number || ''] as [string, string];
+					} catch {
+						return [p.id, ''] as [string, string];
+					}
+				})
+			);
+			projectVersionMap = Object.fromEntries(versionEntries);
 		} catch {
 			projects = [];
+			projectVersionMap = {};
 		} finally {
 			isLoading = false;
 		}
@@ -255,6 +270,9 @@
 										<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{project.name}</div>
 										<div class="flex shrink-0 items-center text-xs gap-2">
 											<span class="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">{typeLabels[project.type] || project.type}</span>
+											{#if projectVersionMap[project.id]}
+												<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{projectVersionMap[project.id]}</span>
+											{/if}
 											{#if normalizeTs(project.createdAt) != null}
 												<span class="text-gray-400 dark:text-gray-500" title={formatDateTime(project.createdAt)}>创建于 {formatDate(project.createdAt)}</span>
 											{/if}

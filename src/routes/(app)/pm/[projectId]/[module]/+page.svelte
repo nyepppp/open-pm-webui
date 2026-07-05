@@ -65,7 +65,7 @@
 			{ key: 'caseType', label: '类型', width: 'w-16' }, { key: 'scenario', label: '场景', width: 'w-24' },
 			{ key: 'precondition', label: '前置条件', width: 'w-24' }, { key: 'steps', label: '步骤', width: 'w-24' },
 			{ key: 'expectedResult', label: '预期结果', width: 'w-24' },
-			{ key: 'requirementId', label: '关联需求', width: 'w-20' }, { key: 'featureName', label: '关联功能', width: 'w-20' },
+			{ key: 'requirementId', label: '关联需求', width: 'w-20' }, { key: 'featureName', label: '关联功能', width: 'w-20' }, { key: 'moduleName', label: '关联模块', width: 'w-20' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
@@ -82,12 +82,10 @@
 		]},
 		roadmap: { name: '产品路线图', editorType: 'table', tableColumns: [
 			{ key: 'priority', label: '优先级', width: 'w-16' }, { key: 'title', label: '节点名称' },
-			{ key: 'description', label: '描述', width: 'w-32' },
 			{ key: 'nodeType', label: '类型', width: 'w-20' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'nodeStatus', label: '状态', width: 'w-20' },
-			{ key: 'startDate', label: '开始', width: 'w-24' },
-			{ key: 'endDate', label: '结束', width: 'w-24' }, { key: 'dependencies', label: '依赖', width: 'w-24' },
+			{ key: 'dependencies', label: '依赖', width: 'w-24' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
 		meeting: { name: '会议纪要', editorType: 'rich' },
@@ -145,6 +143,7 @@
 	let newParamType = $state<'input' | 'output' | 'config'>('config');
 	let newDataType = $state<'string' | 'number' | 'boolean' | 'object' | 'array'>('string');
 	let newDefaultValue = $state('');
+	let newHasDefaultValue = $state(false);
 	let newParamRequired = $state(true);
 	let newParamDescription = $state('');
 	let newSourceDocument = $state('');
@@ -159,6 +158,7 @@
 	let newExpectedResult = $state('');
 	let newRequirementId = $state('');
 	let newParameterId = $state('');
+	let newTestCaseModule = $state('');
 	// Requirement-specific
 	let newSource = $state<'manual' | 'excel' | 'agent'>('manual');
 	let newCategory = $state('');
@@ -290,9 +290,9 @@
 			const token = localStorage.token || '';
 			const data: Record<string, unknown> = { module_type: moduleType, title: newTitle, content: newContent || undefined, status: newStatus, priority: newPriority };
 			if (moduleType === 'parameter') {
-				data.data = { key: newParamKey, paramType: newParamType, dataType: newDataType, defaultValue: newDefaultValue, required: newParamRequired ? 1 : 0, description: newParamDescription, sourceDocument: newSourceDocument, moduleName: newModuleName, featureName: newFeatureName };
+				data.data = { key: newParamKey, paramType: newParamType, dataType: newDataType, defaultValue: newHasDefaultValue ? newDefaultValue : '', hasDefaultValue: newHasDefaultValue ? 1 : 0, required: newParamRequired ? 1 : 0, description: newParamDescription, sourceDocument: newSourceDocument, moduleName: newModuleName, featureName: newFeatureName };
 			} else if (moduleType === 'testcase') {
-				data.data = { caseType: newCaseType, scenario: newScenario, precondition: newPrecondition, steps: newSteps, inputData: newInputData, expectedResult: newExpectedResult, requirementId: newRequirementId, parameterId: newParameterId, featureName: newFeatureName };
+				data.data = { caseType: newCaseType, scenario: newScenario, precondition: newPrecondition, steps: newSteps, inputData: newInputData, expectedResult: newExpectedResult, requirementId: newRequirementId, parameterId: newParameterId, featureName: newFeatureName, moduleName: newTestCaseModule };
 			} else if (moduleType === 'requirement') {
 				data.data = { source: newSource, category: newCategory, description: newDescription, tags: newTags.split(',').map(t => t.trim()).filter(Boolean), userRole: newUserRole, expectedBenefit: newExpectedBenefit, relatedModules: newRelatedModules.split(',').map(t => t.trim()).filter(Boolean) };
 				data.content = newDescription || undefined;
@@ -309,6 +309,14 @@
 				data.data = { competitorUrl: newFormData.competitorUrl, description: newFormData.description, dimensions: dims };
 			} else if (moduleType === 'spec') {
 				data.data = { specCategory, relatedRequirements: specRelatedRequirements, relatedParameters: specRelatedParameters };
+			} else if (moduleType === 'meeting') {
+				data.data = { ...newFormData, title: newTitle };
+			} else if (moduleType === 'requirement-boundary') {
+				data.data = { ...newFormData, title: newTitle };
+			} else if (moduleType === 'product-architecture') {
+				data.data = { nodes: [], title: newTitle };
+			} else if (moduleType === 'flowchart') {
+				data.data = { flowchart: { nodes: [], edges: [] }, title: newTitle };
 			} else if (config.editorType === 'form') {
 				data.data = { ...newFormData, title: newTitle };
 			}
@@ -333,8 +341,8 @@
 	}
 	function resetForm() {
 		newTitle = ''; newContent = ''; newPriority = 'p2'; newStatus = 'draft';
-		newParamKey = ''; newParamType = 'config'; newDataType = 'string'; newDefaultValue = ''; newParamRequired = true; newParamDescription = ''; newSourceDocument = ''; newModuleName = ''; newFeatureName = '';
-		newCaseType = 'functional'; newScenario = ''; newPrecondition = ''; newSteps = ''; newInputData = ''; newExpectedResult = ''; newRequirementId = ''; newParameterId = '';
+		newParamKey = ''; newParamType = 'config'; newDataType = 'string'; newDefaultValue = ''; newHasDefaultValue = false; newParamRequired = true; newParamDescription = ''; newSourceDocument = ''; newModuleName = ''; newFeatureName = '';
+		newCaseType = 'functional'; newScenario = ''; newPrecondition = ''; newSteps = ''; newInputData = ''; newExpectedResult = ''; newRequirementId = ''; newParameterId = ''; newTestCaseModule = '';
 		newSource = 'manual'; newCategory = ''; newDescription = ''; newTags = ''; newUserRole = ''; newExpectedBenefit = ''; newRelatedModules = '';
 		newNodeType = 'feature'; newNodeStatus = 'planned'; newStartDate = ''; newEndDate = ''; newDependencies = '';
 		newVersionId = '';
@@ -1157,47 +1165,53 @@
 						{/if}
 					{/if}
 					{#if moduleType === 'parameter'}
-						<div class="flex items-center gap-2">
-							<PMFormInput label="" placeholder="参数 Key" class="flex-1" bind:value={newParamKey} />
-							<PMFormToggleGroup
-								options={[
-									{ value: 'input', label: '输入', color: paramTypeMap.input.c },
-									{ value: 'output', label: '输出', color: paramTypeMap.output.c },
-									{ value: 'config', label: '配置', color: paramTypeMap.config.c }
-								]}
-								bind:selected={newParamType}
-							/>
-						</div>
-						<div class="flex items-center gap-2">
-							<PMFormSelect
-								options={['string', 'number', 'boolean', 'object', 'array'].map((dt) => ({ value: dt, label: dt }))}
-								bind:value={newDataType}
-							/>
-							<PMFormInput label="" placeholder="默认值" class="flex-1" bind:value={newDefaultValue} />
-						</div>
-						<div class="flex items-center gap-2">
-							<label class="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" bind:checked={newParamRequired} /> 必填</label>
-							<PMFormInput label="" placeholder="描述" class="flex-1" bind:value={newParamDescription} />
-						</div>
 						<div class="flex gap-2">
-							<PMFormSelect
-								placeholder="来源文档（可选）"
-								options={[...prdEntries.map((prd: any) => ({ value: prd.title, label: prd.title })), { value: '__manual', label: '手动输入...' }]}
-								bind:value={newSourceDocument}
-								class="flex-1"
-							/>
 							<PMFormSelect
 								placeholder="选择模块"
 								options={moduleOptions.map((mo: string) => ({ value: mo, label: mo }))}
 								bind:value={newModuleName}
+								editable={true}
 								class="flex-1"
 							/>
 							<PMFormSelect
 								placeholder="选择功能"
 								options={featureOptionsForModule.map((fo: string) => ({ value: fo, label: fo }))}
 								bind:value={newFeatureName}
+								editable={true}
 								class="flex-1"
 								disabled={!newModuleName}
+							/>
+						</div>
+						<div class="border-t border-gray-100 dark:border-gray-800 pt-2 mt-1">
+							<div class="flex items-center gap-2">
+								<PMFormInput label="" placeholder="参数 Key" class="flex-1" bind:value={newParamKey} />
+								<PMFormToggleGroup
+									options={[
+										{ value: 'input', label: '输入', color: paramTypeMap.input.c },
+										{ value: 'output', label: '输出', color: paramTypeMap.output.c },
+										{ value: 'config', label: '配置', color: paramTypeMap.config.c }
+									]}
+									bind:selected={newParamType}
+								/>
+							</div>
+							<div class="flex items-center gap-2">
+								<PMFormSelect
+									options={['string', 'number', 'boolean', 'object', 'array'].map((dt) => ({ value: dt, label: dt }))}
+									bind:value={newDataType}
+								/>
+								<label class="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap"><input type="checkbox" bind:checked={newHasDefaultValue} /> 默认值</label>
+								{#if newHasDefaultValue}
+									<PMFormInput label="" placeholder="输入默认值" class="flex-1" bind:value={newDefaultValue} />
+								{/if}
+							</div>
+							<div class="flex items-center gap-2">
+								<label class="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" bind:checked={newParamRequired} /> 必填</label>
+								<PMFormInput label="" placeholder="描述" class="flex-1" bind:value={newParamDescription} />
+							</div>
+							<PMFormSelect
+								placeholder="来源文档（可选）"
+								options={[...prdEntries.map((prd: any) => ({ value: prd.title, label: prd.title })), { value: '__manual', label: '手动输入...' }]}
+								bind:value={newSourceDocument}
 							/>
 						</div>
 					{:else if moduleType === 'testcase'}
@@ -1234,6 +1248,11 @@
 							placeholder="关联功能（可选）"
 							options={featureOptions.map((fo: string) => ({ value: fo, label: fo }))}
 							bind:value={newFeatureName}
+						/>
+						<PMFormSelect
+							placeholder="关联模块（可选）"
+							options={moduleOptions.map((mo: string) => ({ value: mo, label: mo }))}
+							bind:value={newTestCaseModule}
 						/>
 					{:else if moduleType === 'requirement'}
 						<PMFormTextarea label="" placeholder="需求描述" rows="2" bind:value={newDescription} />
@@ -1364,7 +1383,8 @@
 						{@const ns = getEntryData(entry, 'nodeStatus')}
 						{@const nt = getEntryData(entry, 'nodeType')}
 						{@const vid = getEntryData(entry, 'versionId')}
-						{@const vLabel = vid ? ($versionList.find((v: any) => v.id === vid)?.versionNumber || vid) : ''}
+						{@const vidMatch = vid ? $versionList.find((v: any) => v.id === vid) : null}
+						{@const vLabel = vidMatch ? (vidMatch.versionNumber || vidMatch.version_number) : (vid && !/^[0-9a-f]{8}-/i.test(vid) ? vid : '')}
 						{@const pg = getEntryData(entry, 'progress') || 0}
 						{@const barColor = ns === 'completed' ? 'bg-green-500' : ns === 'in_progress' ? 'bg-blue-500' : ns === 'delayed' ? 'bg-red-500' : 'bg-gray-400'}
 						{@const durationDays = Math.ceil((ed - sd) / 86400000)}
@@ -1489,7 +1509,9 @@
 										{/if}
 									{:else if col.key === 'versionId'}
 										{@const vid = getEntryData(entry, 'versionId') || entry.versionId}
-										{#if vid}<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{$versionList.find((v: any) => v.id === vid)?.versionNumber || vid}</span>{:else}<span class="text-xs text-gray-400">-</span>{/if}
+										{@const vidMatch = vid ? $versionList.find((v: any) => v.id === vid) : null}
+										{@const vidDisplay = vidMatch ? (vidMatch.versionNumber || vidMatch.version_number) : (vid && !/^[0-9a-f]{8}-/i.test(vid) ? vid : '')}
+										{#if vidDisplay}<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{vidDisplay}</span>{:else}<span class="text-xs text-gray-400">-</span>{/if}
 									{:else if col.key === 'startDate' || col.key === 'endDate'}
 										{#if (moduleType === 'schedule' || moduleType === 'roadmap') && inlineEditCell?.entryId === entry.id && inlineEditCell?.field === col.key}
 											<input type="date" class="text-xs px-1 py-0.5 bg-white dark:bg-gray-800 border border-blue-300 rounded outline-hidden" bind:value={inlineEditValue} onblur={() => saveInlineEdit(entry)} onchange={() => saveInlineEdit(entry)} />
@@ -2235,7 +2257,7 @@
 									triggerAutoSave();
 								}}
 								placeholder="在此编写内容..."
-								showToc={true}
+								showToc={moduleType !== 'prd'}
 								annotations={editingEntry?.data?.annotations || []}
 								onAnnotationsChange={(newAnnotations) => {
 									if (editingEntry) {
@@ -2367,6 +2389,15 @@
 						{/each}
 					</select>
 				</div>
+				<div>
+					<label class="block text-xs font-medium text-gray-500 mb-1">关联模块</label>
+					<select class="w-full text-sm px-2 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg outline-hidden" value={getEntryData(editDrawerEntry, 'moduleName')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.moduleName = (e.target as HTMLSelectElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }}>
+						<option value="">无</option>
+						{#each moduleOptions as mo}
+							<option value={mo}>{mo}</option>
+						{/each}
+					</select>
+				</div>
 			{:else if moduleType === 'parameter'}
 				<div>
 					<label class="block text-xs font-medium text-gray-500 mb-1">参数 Key</label>
@@ -2479,7 +2510,9 @@
 				<div class="text-xs font-medium text-gray-500 uppercase mb-2">版本信息</div>
 				{#if traceEntry.versionId || getEntryData(traceEntry, 'versionId')}
 				{@const entryVid = traceEntry.versionId || getEntryData(traceEntry, 'versionId')}
-				<span class="px-2 py-1 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{$versionList.find((v: any) => v.id === entryVid)?.versionNumber || entryVid}</span>
+				{@const entryVidMatch = entryVid ? $versionList.find((v: any) => v.id === entryVid) : null}
+				{@const entryVidDisplay = entryVidMatch ? (entryVidMatch.versionNumber || entryVidMatch.version_number) : (entryVid && !/^[0-9a-f]{8}-/i.test(entryVid) ? entryVid : '')}
+				{#if entryVidDisplay}<span class="px-2 py-1 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">{entryVidDisplay}</span>{:else}<span class="text-xs text-gray-400">未绑定版本</span>{/if}
 			{:else}<span class="text-xs text-gray-400">未绑定版本</span>{/if}
 			</div>
 			<div>

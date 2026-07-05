@@ -94,6 +94,13 @@
 							type: 'web',
 							data: data
 						});
+					} else if (type === 'pm') {
+						insertTextHandler('');
+
+						onUpload({
+							type: 'pm',
+							data: data
+						});
 					}
 				}}
 			/>
