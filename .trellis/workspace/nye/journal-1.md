@@ -369,3 +369,36 @@ Verified PRD acceptance: 36 check rules across L1-L4 (>=30 required), rule engin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Implement 3 PM features from Issue #18
+
+**Date**: 2026-07-05
+**Task**: Implement 3 PM features from Issue #18
+**Branch**: `main`
+
+### Summary
+
+Implemented prototype annotation linking (PMAnnotationPanel rewrite + PMAnnotationLinkDialog), AI requirement workflow (RequirementReviewSkill + idea_to_prd flow + workflow page rewrite), and architecture diagram auto-sync (auto-extract/sync endpoints + PMMindMap rewrite with version filter/sync/navigation). Quality fixes: json.loads→_extract_json, import placement, reactive binding, localStorage guard, projectId guard. Updated flow-engine.md spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dce282e7d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
