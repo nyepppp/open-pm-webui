@@ -44,12 +44,18 @@ class Tools:
             async with aiohttp.ClientSession() as session:
                 if method.upper() == "GET":
                     async with session.get(url, headers=headers, params=params) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "POST":
                     async with session.post(url, headers=headers, json=data) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "DELETE":
                     async with session.delete(url, headers=headers) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 else:
                     return {"error": f"Unsupported HTTP method: {method}"}
@@ -135,7 +141,7 @@ class Tools:
         :param entry_id: 条目 ID
         :return: 条目的关联关系列表
         """
-        result = await self._request("GET", f"/pm/projects/{project_id}/relations")
+        result = await self._request("GET", f"/pm/entries/{entry_id}/suggest-relations")
         return json.dumps(result, ensure_ascii=False)
 
     async def generate_prd(self, entry_id: str, instructions: str = "", __event_call__: callable = None, __event_emitter__: callable = None, __user__: dict = None) -> str:
@@ -179,4 +185,18 @@ class Tools:
                 if not write_confirm:
                     return json.dumps({"status": "cancelled", "message": "用户取消了写入操作", "preview": result}, ensure_ascii=False)
 
+        return json.dumps(result, ensure_ascii=False)
+
+    async def extract_parameters(self, entry_id: str, __event_emitter__: callable = None, __user__: dict = None) -> str:
+        """
+        从条目中提取结构化参数（参数名、类型、默认值、描述等）
+
+        :param entry_id: 条目 ID
+        :param __event_emitter__: 事件发射器 (可选，用于预览提取结果)
+        :return: 提取的参数列表
+        """
+        result = await self._request("POST", f"/pm/entries/{entry_id}/extract-parameters")
+        if "error" not in result and __event_emitter__:
+            preview = result.get("content", result.get("parameters", json.dumps(result, ensure_ascii=False)))
+            await self._emit_preview(f"**参数提取结果预览**\n\n{preview}", __event_emitter__)
         return json.dumps(result, ensure_ascii=False)

@@ -50,13 +50,21 @@ class Tools:
             async with aiohttp.ClientSession() as session:
                 if method.upper() == "GET":
                     async with session.get(url, headers=headers, params=params) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "POST":
                     async with session.post(url, headers=headers, json=data) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "DELETE":
                     async with session.delete(url, headers=headers) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
+                else:
+                    return {"error": f"Unsupported HTTP method: {method}"}
         except Exception as e:
             log.error(f"PM API request failed: {e}")
             return {"error": str(e)}
@@ -138,6 +146,18 @@ class Tools:
         # 解析检查级别
         target_levels = [l.strip() for l in levels.split(",")]
         
+        if not CHECK_RULES:
+            return json.dumps({
+                "entry_id": entry_id,
+                "entry_title": title,
+                "warning": "规则文件未加载或为空，无法执行检查。请确认 pm_check_rules.json 文件存在且格式正确。",
+                "score": 0,
+                "total_rules": 0,
+                "passed": 0,
+                "failed": 0,
+                "results": [],
+            }, ensure_ascii=False)
+        
         # 执行检查
         check_results = []
         passed_count = 0
@@ -207,12 +227,11 @@ class Tools:
             if not confirm:
                 return json.dumps({"status": "cancelled", "message": "用户取消了更新"}, ensure_ascii=False)
         
-        return json.dumps({
-            "entry_id": entry_id,
+        result = await self._request("POST", f"/pm/entries/{entry_id}/check/status", {
             "rule_id": rule_id,
-            "status": status,
-            "message": "状态已更新"
-        }, ensure_ascii=False)
+            "status": status
+        })
+        return json.dumps(result, ensure_ascii=False)
 
     async def suggest_fix(self, entry_id: str, rule_id: str, __user__: dict = None) -> str:
         """

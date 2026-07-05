@@ -40,15 +40,21 @@ class Tools:
             async with aiohttp.ClientSession() as session:
                 if method.upper() == "GET":
                     async with session.get(url, headers=headers, params=params) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "POST":
                     async with session.post(url, headers=headers, json=data) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "DELETE":
                     async with session.delete(url, headers=headers) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 else:
-                    return {"error": f"Unsupported method: {method}"}
+                    return {"error": f"Unsupported HTTP method: {method}"}
         except Exception as e:
             log.error(f"PM API request failed: {e}")
             return {"error": str(e)}
@@ -73,22 +79,29 @@ class Tools:
         result = await self._request("GET", f"/pm/projects/{project_id}/workflow/progress")
         return json.dumps(result, ensure_ascii=False)
 
-    async def execute_workflow(self, workflow_id: str, steps: list, __event_call__: callable = None, __user__: dict = None) -> str:
+    async def execute_workflow(self, workflow_id: str, steps: str, __event_call__: callable = None, __user__: dict = None) -> str:
         """
         执行工作流（需要确认）
 
         :param workflow_id: 工作流 ID
-        :param steps: 要执行的工作流步骤列表
+        :param steps: 要执行的工作流步骤列表 (JSON 字符串)
         :return: JSON 格式的执行结果
         """
+        try:
+            parsed_steps = json.loads(steps) if isinstance(steps, str) else steps
+        except Exception:
+            parsed_steps = [{"action": steps}]
+
         if __event_call__:
             confirm = await __event_call__({
                 "type": "confirmation",
-                "title": "确认执行工作流",
-                "message": f"确定要执行工作流 {workflow_id} 吗？此操作将按顺序执行 {len(steps)} 个步骤。"
+                "data": {
+                    "title": "确认执行工作流",
+                    "message": f"确定要执行工作流 {workflow_id} 吗？此操作将按顺序执行 {len(parsed_steps)} 个步骤。"
+                }
             })
             if not confirm:
                 return json.dumps({"status": "cancelled", "message": "用户取消了工作流执行"}, ensure_ascii=False)
         
-        result = await self._request("POST", "/pm/agent/workflows/execute", {"id": workflow_id, "name": workflow_id, "steps": steps})
+        result = await self._request("POST", "/pm/agent/workflows/execute", {"id": workflow_id, "name": workflow_id, "steps": parsed_steps})
         return json.dumps(result, ensure_ascii=False)

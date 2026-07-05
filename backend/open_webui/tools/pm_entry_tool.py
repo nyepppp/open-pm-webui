@@ -40,14 +40,21 @@ class Tools:
             async with aiohttp.ClientSession() as session:
                 if method.upper() == "GET":
                     async with session.get(url, headers=headers, params=params) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "POST":
                     async with session.post(url, headers=headers, json=data) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
                 elif method.upper() == "DELETE":
                     async with session.delete(url, headers=headers) as resp:
+                        if resp.status >= 400:
+                            return {"error": f"API error {resp.status}", "detail": await resp.text()}
                         return await resp.json()
-            return {"error": "Unsupported HTTP method"}
+                else:
+                    return {"error": f"Unsupported HTTP method: {method}"}
         except Exception as e:
             log.error(f"PM API request failed: {e}")
             return {"error": str(e)}
@@ -188,8 +195,10 @@ class Tools:
         if __event_call__:
             confirm = await __event_call__({
                 "type": "confirmation",
-                "title": "确认删除条目",
-                "message": f"确定要删除条目 {entry_id} 吗？此操作不可撤销。"
+                "data": {
+                    "title": "确认删除条目",
+                    "message": f"确定要删除条目 {entry_id} 吗？此操作不可撤销。"
+                }
             })
             if not confirm:
                 return json.dumps({"status": "cancelled", "message": "用户取消了删除操作"}, ensure_ascii=False)
