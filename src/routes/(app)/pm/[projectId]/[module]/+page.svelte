@@ -229,10 +229,15 @@
 	let featureOptions = $derived([...new Set(parameterEntries.map((p: any) => (p.data || p.metadata || {}).featureName).filter(Boolean))]);
 	let moduleOptions = $derived([...new Set(entries.map((e: any) => (e.data || e.metadata || {}).moduleName).filter(Boolean))].sort());
 	let featureOptionsForModule = $derived(newModuleName ? [...new Set(entries.filter((e: any) => (e.data || e.metadata || {}).moduleName === newModuleName).map((e: any) => (e.data || e.metadata || {}).featureName).filter(Boolean))].sort() : []);
+	let featureOptionsForTestcaseModule = $derived(newTestCaseModule ? [...new Set(entries.filter((e: any) => (e.data || e.metadata || {}).moduleName === newTestCaseModule).map((e: any) => (e.data || e.metadata || {}).featureName).filter(Boolean))].sort() : []);
 
 	// Reset feature when module changes
 	$effect(() => {
 		newModuleName;
+		newFeatureName = '';
+	});
+	$effect(() => {
+		newTestCaseModule;
 		newFeatureName = '';
 	});
 
@@ -619,8 +624,9 @@
 		try {
 			const token = localStorage.token || '';
 			if (!token) { toast.error('未登录，请先登录'); return; }
-			editingEntry = await getEntry(token, entryId);
-			if (!editingEntry) { toast.error('加载条目失败：返回数据为空'); return; }
+			const entry = await getEntry(token, entryId);
+			if (!entry) { toast.error('加载条目失败：返回数据为空'); return; }
+			editingEntry = entry;
 			editingDocTitle = editingEntry.title;
 			editingDocStatus = editingEntry.status || 'draft';
 			editingVersionId = getEntryData(editingEntry, 'versionId') || editingEntry.versionId || '';
@@ -650,7 +656,8 @@
 			}
 			editingEntryId = entryId;
 		} catch (e: any) {
-			toast.error(e.message || '加载文档失败');
+			console.error('[PM] openEntryEditor failed for', entryId, e);
+			toast.error(e?.message || '加载文档失败');
 		}
 	}
 
@@ -807,9 +814,10 @@
 	}
 
 	async function saveAsNewVersion() {
-		if (!editingEntryId) return;
+		if (!editingEntryId) { toast.error('没有正在编辑的文档'); return; }
 		try {
 			const currentVer = $currentVersion;
+			console.log('[PM] Creating new version for entry', editingEntryId, 'projectVersion:', currentVer?.id);
 			await createEntryVersion(projectId, editingEntryId, {
 				changeSummary: `保存: ${editingDocTitle}`,
 				branchName: editingEntry?.branchName || 'main',
@@ -818,8 +826,13 @@
 			toast.success('新版本已创建');
 			await loadEntries();
 		} catch (e: any) {
-			console.warn('[PM] version creation failed:', e?.message);
-			toast.error(e?.message || '创建新版本失败');
+			console.error('[PM] version creation failed:', e);
+			const msg = e?.message || '创建新版本失败';
+			if (msg.includes('404') || msg.includes('405')) {
+				toast.error('版本功能暂不可用，请确认后端已升级到支持版本管理的版本');
+			} else {
+				toast.error(msg);
+			}
 		}
 	}
 
@@ -829,6 +842,7 @@
 			const d = entry.data || entry.metadata || {};
 			if (d.calendarEventId) { toast.info('该条目已同步到日程'); return; }
 			const token = localStorage.token || '';
+			if (!token) { toast.error('未登录，请先登录'); return; }
 			const calendars = await getCalendars(token);
 			if (!calendars || calendars.length === 0) { toast.error('没有可用的日历，请先创建日历'); return; }
 			const defaultCal = calendars.find((c: any) => c.is_default) || calendars[0];
@@ -841,6 +855,7 @@
 			const typeLabel = nodeTypeMap[nodeType]?.l || nodeType;
 			const statusLabel = nodeStatusMap[nodeStatus]?.l || nodeStatus;
 			const assignee = d.assignee || '';
+			console.log('[PM] Syncing to calendar:', entry.title, { startDate, endDate, calendarId: defaultCal.id });
 			const result = await createCalendarEvent(token, {
 				calendar_id: defaultCal.id,
 				title: `${entry.title} - ${typeLabel} - ${statusLabel}`,
@@ -928,7 +943,7 @@
 	}
 
 	// Product architecture view toggle
-	let archView = $state<'cards' | 'mindmap'>('mindmap');
+	let archView = $state<'cards' | 'mindmap'>('cards');
 
 	// Prototype editor tabs
 	let protoTab = $state<'design' | 'annotations' | 'review'>('design');
@@ -1272,16 +1287,20 @@
 								class="flex-1"
 							/>
 						</div>
-						<PMFormSelect
-							placeholder="关联功能（可选）"
-							options={featureOptions.map((fo: string) => ({ value: fo, label: fo }))}
-							bind:value={newFeatureName}
-						/>
-						<PMFormSelect
-							placeholder="关联模块（可选）"
-							options={moduleOptions.map((mo: string) => ({ value: mo, label: mo }))}
-							bind:value={newTestCaseModule}
-						/>
+						<div class="flex gap-2">
+							<PMFormSelect
+								placeholder="关联模块（可选）"
+								options={moduleOptions.map((mo: string) => ({ value: mo, label: mo }))}
+								bind:value={newTestCaseModule}
+								class="flex-1"
+							/>
+							<PMFormSelect
+								placeholder="关联功能（可选）"
+								options={(newTestCaseModule ? featureOptionsForTestcaseModule : featureOptions).map((fo: string) => ({ value: fo, label: fo }))}
+								bind:value={newFeatureName}
+								class="flex-1"
+							/>
+						</div>
 					{:else if moduleType === 'requirement'}
 						<PMFormTextarea label="" placeholder="需求描述" rows="2" bind:value={newDescription} />
 						<div class="flex items-center gap-2">
@@ -1767,6 +1786,12 @@
 		{/if}
 	{/if}
 	{:else}
+		{#if filteredEntries.length === 0 && !showNewForm}
+			<div class="py-12 text-center">
+				<p class="text-sm text-gray-500 dark:text-gray-400">{query ? '没有找到匹配的条目' : `还没有${config.name}条目`}</p>
+				{#if !query}<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={async () => { showNewForm = true; await tick(); document.getElementById('new-form-container')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}>创建第一个条目</button>{/if}
+			</div>
+		{:else}
 		<div class="px-2.5 py-1 gap-1.5 flex flex-col">{#each filteredEntries as entry (entry.id)}
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 				<div class="flex cursor-pointer w-full px-3.5 py-2 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition group" role="button" tabindex="0" onclick={() => openEntryEditor(entry.id)} onkeydown={(e) => { if (e.key === 'Enter') openEntryEditor(entry.id); }}>
@@ -1834,7 +1859,8 @@
 						{/if}
 					</div></div>
 				</div>
-			{/each}</div>
+				{/each}</div>
+		{/if}
 		{/if}
 		<!-- Pagination -->
 		{#if totalPages > 1}
