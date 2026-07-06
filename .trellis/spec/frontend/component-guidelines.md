@@ -307,6 +307,48 @@ await updateEntry(token, editingEntryId, {
 
 **Why**: If auto-save omits `versionId`, the next auto-save cycle will overwrite the entry data without the version association, effectively un-associating the entry from its version silently.
 
+### Convention: Entry-level version creation API uses snake_case
+
+The frontend API wrapper (`createEntryVersion`) must use snake_case keys to match the backend's FastAPI form data expectations:
+
+```typescript
+// src/lib/apis/pm/version.ts
+export function createEntryVersion(
+    projectId: string,
+    entryId: string,
+    data: {
+        change_summary?: string;
+        branch_name?: string;
+        project_version_id?: string
+    }
+) {
+    return create<EntryVersion>(
+        `/projects/${projectId}/entries/${entryId}/versions`,
+        data
+    );
+}
+```
+
+**Why**: The backend endpoint (`pm.py`) reads `form_data.get('change_summary')`, `form_data.get('branch_name')`, and `form_data.get('project_version_id')`. Using camelCase (`changeSummary`) causes the backend to receive empty values, resulting in versions with missing metadata.
+
+**Wrong**:
+```typescript
+await createEntryVersion(projectId, entryId, {
+    changeSummary: '...', // Backend receives undefined
+    branchName: 'main',    // Backend receives undefined
+    projectVersionId: '...' // Backend receives undefined
+});
+```
+
+**Correct**:
+```typescript
+await createEntryVersion(projectId, entryId, {
+    change_summary: '保存: PRD文档',
+    branch_name: 'main',
+    project_version_id: currentVer?.id
+});
+```
+
 ---
 
 ## SPEC Module Pattern
