@@ -5,7 +5,7 @@
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
 	import { getEntries, createEntry, deleteEntry, updateEntry, getEntry } from '$lib/apis/pm/index';
-	import { createCalendarEvent, getCalendars } from '$lib/apis/calendar';
+	import { createCalendarEvent, getCalendars, deleteCalendarEvent } from '$lib/apis/calendar';
 	import { currentVersion, versions as versionList } from '$lib/stores/pm/versionStore';
 	import { createNewNote } from '$lib/apis/notes/index';
 	import { getModuleFields, getModuleEditorConfig, type ModuleEditorConfig } from '$lib/components/pm/moduleFields';
@@ -624,6 +624,13 @@
 	let saveStatus = $state<'saved' | 'unsaved' | 'auto-saving'>('saved');
 	let lastAutoSaveTime = $state<number>(0);
 	let showSaveVersionDialog = $state(false);
+	
+	// Calendar sync dialog state
+	let showCalendarSyncDialog = $state(false);
+	let calendarSyncEntry: any = null;
+	let calendarsList: any[] = $state([]);
+	let selectedCalendarId = $state('');
+	let calendarSyncResolve: ((calendarId: string | null) => void) | null = null;
 
 	async function openEntryEditor(entryId: string) {
 		try {
@@ -845,24 +852,55 @@
 	async function syncSingleToCalendar(entry: any) {
 		try {
 			const d = entry.data || entry.metadata || {};
-			if (d.calendarEventId) { toast.info('该条目已同步到日程'); return; }
 			const token = localStorage.token || '';
 			if (!token) { toast.error('未登录，请先登录'); return; }
+			
+			// Check if already synced
+			if (d.calendarEventId) {
+				const shouldOverwrite = await openConfirmOverwrite();
+				if (!shouldOverwrite) return;
+			}
+			
 			const calendars = await getCalendars(token);
-			if (!calendars || calendars.length === 0) { toast.error('没有可用的日历，请先创建日历'); return; }
-			const defaultCal = calendars.find((c: any) => c.is_default) || calendars[0];
-			if (!defaultCal) { toast.error('没有可用的日历，请先创建日历'); return; }
+			// Filter out system calendars (e.g., Scheduled Tasks)
+			const userCalendars = calendars.filter((c: any) => !c.is_system);
+			if (!userCalendars || userCalendars.length === 0) { toast.error('没有可用的日历，请先创建日历'); return; }
+			
+			console.log('[PM] Available calendars:', userCalendars.map(c => ({ id: c.id, name: c.name })));
+			
+			// Let user select which calendar to sync to
+			let calendarId = userCalendars[0].id;
+			console.log('[PM] Selected calendar ID:', calendarId);
+			if (userCalendars.length > 1) {
+				const selected = await openCalendarSelect(userCalendars);
+				if (selected) calendarId = selected;
+			}
+			
 			const startDate = d.startDate ? new Date(d.startDate) : null;
 			const endDate = d.endDate ? new Date(d.endDate) : (startDate ? new Date(startDate.getTime() + 86400000) : null);
-			if (!startDate) { toast.info('请先设置开始日期，才能同步到日程'); return; }
+			if (!startDate || isNaN(startDate.getTime())) { toast.info('请先设置有效的开始日期，才能同步到日程'); return; }
+			
 			const nodeType = d.nodeType || 'feature';
 			const nodeStatus = d.nodeStatus || 'planned';
 			const typeLabel = nodeTypeMap[nodeType]?.l || nodeType;
 			const statusLabel = nodeStatusMap[nodeStatus]?.l || nodeStatus;
 			const assignee = d.assignee || '';
-			console.log('[PM] Syncing to calendar:', entry.title, { startDate, endDate, calendarId: defaultCal.id });
+			
+			console.log('[PM] Syncing to calendar:', entry.title, { startDate, endDate, calendarId });
+			
+			// If already synced, delete old event first
+			if (d.calendarEventId) {
+				try {
+					await deleteCalendarEvent(token, d.calendarEventId);
+					console.log('[PM] Deleted old calendar event:', d.calendarEventId);
+				} catch (e) {
+					console.warn('[PM] Failed to delete old calendar event:', e);
+					toast.warning('无法删除旧日程事件，将继续创建新事件');
+				}
+			}
+			
 			const result = await createCalendarEvent(token, {
-				calendar_id: defaultCal.id,
+				calendar_id: calendarId,
 				title: `${entry.title} - ${typeLabel} - ${statusLabel}`,
 				description: `${moduleType === 'roadmap' ? '路线图' : '排期'}同步: ${entry.title} (${typeLabel}, ${statusLabel})${assignee ? ' · 负责人: ' + assignee : ''}`,
 				start_at: Math.floor(startDate.getTime() / 1000),
@@ -870,7 +908,9 @@
 				all_day: true,
 				data: { pm_entry_id: entry.id, project_id: projectId, module_type: moduleType }
 			});
-			// Mark as synced to prevent duplicates
+			if (!result) throw new Error('创建日程事件失败：服务器返回空');
+			
+			// Mark as synced
 			const updatedData = { ...(entry.data || {}) };
 			updatedData.calendarEventId = result.id;
 			await updateEntry(token, entry.id, { data: updatedData });
@@ -880,6 +920,48 @@
 			console.error('[PM] syncSingleToCalendar error:', e);
 			toast.error(e.message || '同步到日程失败');
 		}
+	}
+	
+	// Calendar sync: confirm overwrite dialog
+	async function openConfirmOverwrite(): Promise<boolean> {
+		return new Promise((resolve) => {
+			calendarSyncResolve = (value) => {
+				calendarSyncResolve = null;
+				resolve(value === 'overwrite');
+			};
+			showCalendarSyncDialog = true;
+			calendarSyncEntry = { type: 'confirm' };
+		});
+	}
+	
+	// Calendar sync: select calendar dialog
+	async function openCalendarSelect(calendars: any[]): Promise<string | null> {
+		return new Promise((resolve) => {
+			calendarsList = calendars;
+			selectedCalendarId = calendars[0]?.id || '';
+			calendarSyncResolve = (value) => {
+				calendarSyncResolve = null;
+				resolve(value);
+			};
+			showCalendarSyncDialog = true;
+			calendarSyncEntry = { type: 'select' };
+		});
+	}
+	
+	function handleCalendarSyncConfirm() {
+		showCalendarSyncDialog = false;
+		if (calendarSyncEntry?.type === 'select') {
+			calendarSyncResolve?.(selectedCalendarId);
+		} else {
+			calendarSyncResolve?.('overwrite');
+		}
+		calendarSyncEntry = null;
+	}
+	
+	function handleCalendarSyncCancel() {
+		showCalendarSyncDialog = false;
+		calendarSyncResolve?.(null);
+		calendarSyncEntry = null;
 	}
 
 	// Traceability side panel
@@ -1607,8 +1689,9 @@
 							{/each}{/if}
 							<td class="px-4 py-2.5 text-right"><div class="flex items-center justify-end gap-1">
 								{#if moduleType === 'roadmap' || moduleType === 'schedule'}
-									<button class="p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition" title="同步到日程" onclick={() => syncSingleToCalendar(entry)}>
-										<svg class="size-3.5 text-gray-400 hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75v7.5a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 26.25v-7.5M3 9h18M3 9l9-6 9 6" /></svg>
+									{@const isSynced = !!(entry.data?.calendarEventId || entry.metadata?.calendarEventId)}
+									<button class="p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition" title={isSynced ? '已同步到日程（点击更新）' : '同步到日程'} onclick={() => syncSingleToCalendar(entry)}>
+										<svg class="size-3.5 {isSynced ? 'text-blue-500' : 'text-gray-400 hover:text-blue-500'}" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75v7.5a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 26.25v-7.5M3 9h18M3 9l9-6 9 6" /></svg>
 									</button>
 								{/if}
 								<button class="p-1 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition" title="溯源信息" onclick={() => openTracePanel(entry)}>
@@ -2776,6 +2859,42 @@
 				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
 				新建自定义模板
 			</button>
+		</div>
+	</div>
+{/if}
+
+<!-- Calendar Sync Dialog -->
+{#if showCalendarSyncDialog}
+	<div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onclick={handleCalendarSyncCancel}>
+		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden" onclick={(e) => e.stopPropagation()}>
+			<div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+				<h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
+					{calendarSyncEntry?.type === 'select' ? '选择日历' : '同步到日程'}
+				</h3>
+			</div>
+			<div class="px-6 py-4">
+				{#if calendarSyncEntry?.type === 'confirm'}
+					<p class="text-sm text-gray-600 dark:text-gray-400">该条目已同步到日程，是否覆盖？</p>
+				{:else if calendarSyncEntry?.type === 'select'}
+					<p class="text-sm text-gray-600 dark:text-gray-400 mb-3">请选择要同步到的日历：</p>
+					<div class="space-y-2">
+						{#each calendarsList as cal}
+							<label class="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+								<input type="radio" name="calendar-select" value={cal.id} bind:group={selectedCalendarId} class="w-4 h-4 text-blue-600" />
+								<span class="text-sm text-gray-700 dark:text-gray-300">{cal.name}</span>
+							</label>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+				<button class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition" onclick={handleCalendarSyncCancel}>
+					取消
+				</button>
+				<button class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition" onclick={handleCalendarSyncConfirm}>
+					{calendarSyncEntry?.type === 'confirm' ? '覆盖' : '确认'}
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}
