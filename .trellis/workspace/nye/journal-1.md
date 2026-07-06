@@ -468,3 +468,37 @@ Implemented unified /pm/architecture page with tab switching between mindmap and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: 修复版本保存功能
+
+**Date**: 2026-07-07
+**Task**: 修复版本保存功能
+**Branch**: `main`
+
+### Summary
+
+修复PRD编辑器版本保存功能：1) 统一createEntryVersion API参数为snake_case以匹配后端FastAPI form_data预期；2) 修复PMSaveVersionDialog的onSaveContentOnly回调，改为实际调用saveEntryContentOnly保存内容；3) 在spec中记录版本管理API参数规范
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f2d39d11c` | (see git log) |
+| `ecc1026c0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
