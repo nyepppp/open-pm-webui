@@ -11,23 +11,21 @@
 		saveArchitectureEntry, addManualModule, addManualFeature,
 		deleteManualModule, deleteManualFeature
 	} from '$lib/services/architectureService';
-	import ArchitectureTabBar from '$lib/components/pm/architecture/ArchitectureTabBar.svelte';
 	import ArchitectureLoading from '$lib/components/pm/architecture/ArchitectureLoading.svelte';
 	import ArchitectureError from '$lib/components/pm/architecture/ArchitectureError.svelte';
-	import PMMindMap from '$lib/components/pm/PMMindMap.svelte';
 	import ModuleFeatureTree from '$lib/components/pm/ModuleFeatureTree.svelte';
 	import ParameterTable from '$lib/components/pm/ParameterTable.svelte';
-	import { versions as versionList } from '$lib/stores/pm/versionStore';
+	import PMVersionSelector from '$lib/components/pm/PMVersionSelector.svelte';
 	import type { MindMapNode } from '$lib/apis/pm/types';
 
 	let projectId = $derived($page.params.projectId!);
-	let activeTab = $state<'mindmap' | 'params'>('mindmap');
-	let navigateToModule = $state<string | null>(null);
-	let navigateToFeature = $state<string | null>(null);
 	let selectedModule = $state<string | null>(null);
 	let selectedFeature = $state<string | null>(null);
 	let treeCollapsed = $state(false);
+	let showVersionSelector = $state(false);
+	let selectedVersion = $state<{ id: string; versionNumber: string; label?: string } | null>(null);
 
+	// Responsive: collapse tree on small screens
 	$effect(() => {
 		function onResize() { if (window.innerWidth < 768 && !treeCollapsed) treeCollapsed = true; }
 		onResize();
@@ -35,34 +33,7 @@
 		return () => window.removeEventListener('resize', onResize);
 	});
 
-	$effect(() => {
-		if (navigateToModule) {
-			selectedModule = navigateToModule;
-			selectedFeature = navigateToFeature;
-			navigateToModule = null;
-			navigateToFeature = null;
-		}
-	});
-
 	onMount(() => { loadData(projectId); });
-
-	let versionOptions = $derived($versionList.map((v: any) => ({ id: v.id, versionNumber: v.versionNumber, label: v.label })));
-
-	async function handleMindmapChange(nodes: MindMapNode[]) {
-		try {
-			const token = localStorage.token || '';
-			await saveArchitectureEntry(token, projectId, $editingEntryId, nodes, $archEntries[0]?.data);
-			await loadData(projectId);
-		} catch (e: any) { toast.error(e.message || '保存架构图失败'); }
-	}
-
-	async function handleSync() { await loadData(projectId); }
-
-	function handleNavigate(target: { moduleName: string; featureName?: string }) {
-		navigateToModule = target.moduleName;
-		navigateToFeature = target.featureName || null;
-		activeTab = 'params';
-	}
 
 	async function handleAddModule(name: string) {
 		try {
@@ -106,45 +77,75 @@
 		} catch (e: any) { toast.error(e.message || '删除功能失败'); }
 	}
 
-	function handleTreeSelect(module: string, feature?: string) { selectedModule = module; selectedFeature = feature || null; }
+	function handleTreeSelect(module: string, feature?: string) {
+		selectedModule = module;
+		selectedFeature = feature || null;
+	}
+
 	async function handleParamDataChange() { await loadData(projectId); }
+
+	function handleVersionSelect(version: { id: string; versionNumber: string; label?: string }) {
+		selectedVersion = version;
+		showVersionSelector = false;
+		// TODO: Reload data with version filter
+		toast.success(`已切换到版本 ${version.versionNumber}`);
+	}
 </script>
 
 <div class="w-full min-h-full h-full px-3 md:px-[18px]">
+	<!-- Header -->
 	<div class="flex flex-col gap-1 px-1 mt-1.5 mb-3">
 		<div class="flex justify-between items-center">
 			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 				<div>产品架构</div>
+				{#if selectedVersion}
+					<span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+						{selectedVersion.versionNumber}
+					</span>
+				{/if}
 			</div>
 			<div class="flex w-full justify-end gap-1.5">
+				<!-- Version Selector -->
+				<button
+					class="px-2 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition font-medium text-sm flex items-center"
+					onclick={() => { showVersionSelector = true; }}
+					title="选择版本"
+				>
+					<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+					</svg>
+					<span>{selectedVersion?.versionNumber || '选择版本'}</span>
+				</button>
+				<!-- AI Assistant -->
 				<button class="px-2 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white transition font-medium text-sm flex items-center" title="AI 助手">
 					<svg class="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
 					<div class="ml-1 text-xs">AI</div>
 				</button>
 			</div>
 		</div>
-		<ArchitectureTabBar {activeTab} onTabChange={(tab) => { activeTab = tab; }} />
+		<!-- Breadcrumb -->
+		<div class="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400 px-0.5">
+			<span class="hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer" onclick={() => { selectedModule = null; selectedFeature = null; }}>产品架构</span>
+			{#if selectedModule}
+				<span class="text-gray-300 dark:text-gray-600">/</span>
+				<span class="hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer" onclick={() => { selectedFeature = null; }}>{selectedModule}</span>
+			{/if}
+			{#if selectedFeature}
+				<span class="text-gray-300 dark:text-gray-600">/</span>
+				<span class="text-gray-700 dark:text-gray-300">{selectedFeature}</span>
+			{/if}
+		</div>
 	</div>
 
+	<!-- Content -->
 	{#if $isLoading}
 		<ArchitectureLoading />
 	{:else if $loadError}
 		<ArchitectureError error={$loadError} onRetry={() => retryLoadData(projectId)} />
-	{:else if activeTab === 'mindmap'}
-		<div class="h-[calc(100vh-200px)]">
-			<PMMindMap
-				nodes={$mindmapNodes}
-				onChange={handleMindmapChange}
-				{projectId}
-				versions={versionOptions}
-				onSync={handleSync}
-				aggregatedModules={$aggregatedTree}
-				onNavigate={handleNavigate}
-			/>
-		</div>
-	{:else if activeTab === 'params'}
+	{:else}
 		<div class="flex gap-3 h-[calc(100vh-200px)]">
-			<div class="{treeCollapsed ? 'w-full' : 'w-64 shrink-0'} flex flex-col">
+			<!-- Left: Module-Feature Tree -->
+			<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
 				<div class="flex items-center justify-between mb-2">
 					{#if !treeCollapsed}
 						<span class="text-sm font-medium text-gray-700 dark:text-gray-300">模块结构</span>
@@ -169,8 +170,10 @@
 					onDeleteModule={handleDeleteModule}
 					onDeleteFeature={handleDeleteFeature}
 					collapsed={treeCollapsed}
+					versionInfo={selectedVersion}
 				/>
 			</div>
+			<!-- Right: Parameter Table -->
 			<div class="flex-1 min-w-0 overflow-hidden">
 				<ParameterTable
 					entries={$parameterEntries}
@@ -178,8 +181,17 @@
 					filterModule={selectedModule}
 					filterFeature={selectedFeature}
 					onDataChange={handleParamDataChange}
+					versionId={selectedVersion?.id || null}
 				/>
 			</div>
 		</div>
 	{/if}
 </div>
+
+<!-- Version Selector Modal -->
+<PMVersionSelector
+	isOpen={showVersionSelector}
+	onClose={() => { showVersionSelector = false; }}
+	onSelect={handleVersionSelect}
+	{projectId}
+/>

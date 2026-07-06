@@ -23,6 +23,7 @@
 		onDeleteModule?: (name: string) => void;
 		onDeleteFeature?: (moduleName: string, featureName: string) => void;
 		collapsed?: boolean;
+		versionInfo?: { id: string; versionNumber: string; label?: string } | null;
 	}
 
 	let {
@@ -34,7 +35,8 @@
 		onAddFeature,
 		onDeleteModule,
 		onDeleteFeature,
-		collapsed = false
+		collapsed = false,
+		versionInfo = null
 	}: Props = $props();
 
 	let expandedModules = $state<Set<string>>(new Set());
@@ -42,6 +44,16 @@
 	let newModuleName = $state('');
 	let showAddFeatureModule = $state<string | null>(null);
 	let newFeatureName = $state('');
+
+	let searchQuery = $state('');
+	let filteredModules = $derived.by(() => {
+		if (!searchQuery.trim()) return modules;
+		const q = searchQuery.toLowerCase();
+		return modules.filter(mod => 
+			mod.name.toLowerCase().includes(q) || 
+			mod.features.some(f => f.name.toLowerCase().includes(q))
+		);
+	});
 
 	// Auto-expand the module containing selectedFeature
 	$effect(() => {
@@ -115,7 +127,29 @@
 {:else}
 	<!-- Expanded mode: tree navigation -->
 	<div class="flex flex-col gap-0.5 overflow-y-auto text-sm">
-		{#each modules as mod}
+		<!-- Search -->
+		<div class="px-2 py-1.5">
+			<div class="relative">
+				<svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+				</svg>
+				<input
+					type="text"
+					class="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 placeholder-gray-400"
+					placeholder="搜索模块或功能..."
+					bind:value={searchQuery}
+				/>
+			</div>
+		</div>
+		
+		<!-- Version info -->
+		{#if versionInfo}
+			<div class="px-2 py-1 text-xs text-gray-500 dark:text-gray-400">
+				版本: <span class="font-medium text-gray-700 dark:text-gray-300">{versionInfo.versionNumber}</span>
+			</div>
+		{/if}
+		
+		{#each filteredModules as mod}
 			<!-- Module node -->
 			<button
 				class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-left transition-colors {selectedModule === mod.name ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'}"

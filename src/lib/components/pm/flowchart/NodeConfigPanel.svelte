@@ -9,9 +9,10 @@
 		projectId?: string;
 		onUpdate: (nodeId: string, data: Partial<FlowchartNode['data']>) => void;
 		onClose: () => void;
+		onViewTraceability?: () => void;
 	}
 
-	let { node, parameterEntries = [], projectId = '', onUpdate, onClose }: Props = $props();
+	let { node, parameterEntries = [], projectId = '', onUpdate, onClose, onViewTraceability }: Props = $props();
 
 	let nodeLabel = $state(node.data.label);
 	let nodeDescription = $state(node.data.description || '');
@@ -60,27 +61,38 @@
 	}
 
 	function handleBind(binding: { entityType: string; entityId: string; entityName: string }) {
-		const traceabilityData: Record<string, unknown> = {
+		const traceabilityData = {
 			...binding,
 			boundAt: Date.now()
 		};
 		onUpdate(node.id, {
-			traceability: traceabilityData
+			traceability: traceabilityData as any
 		});
 	}
 
 	function handleUnbind() {
-		const data: Record<string, unknown> = {};
-		onUpdate(node.id, data);
+		onUpdate(node.id, {
+			traceability: undefined as any
+		});
 	}
 </script>
 
 <div class="absolute right-0 top-0 h-full w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto z-20 shadow-lg">
 	<div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
 		<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">节点配置</h3>
-		<button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" onclick={onClose}>
-			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-		</button>
+		<div class="flex items-center gap-2">
+			{#if onViewTraceability}
+				<button 
+					class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+					onclick={onViewTraceability}
+				>
+					查看溯源
+				</button>
+			{/if}
+			<button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" onclick={onClose}>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+			</button>
+		</div>
 	</div>
 
 	<!-- Tabs -->

@@ -2,7 +2,9 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { createEntry, deleteEntry, updateEntry } from '$lib/apis/pm/index';
-	import type { ModuleEntry, ModuleStatus, Priority } from '$lib/apis/pm/types';
+	import { getRequirementList } from '$lib/apis/pm/modules/requirement';
+	import { getRelationList, createRelation, deleteRelation } from '$lib/apis/pm/relation';
+	import type { ModuleEntry, ModuleStatus, Priority, Relation } from '$lib/apis/pm/types';
 
 	interface Props {
 		entries: ModuleEntry[];
@@ -10,6 +12,7 @@
 		filterModule?: string | null;
 		filterFeature?: string | null;
 		onDataChange?: () => void;
+		versionId?: string | null;
 	}
 
 	let {
@@ -17,7 +20,8 @@
 		projectId = '',
 		filterModule = null,
 		filterFeature = null,
-		onDataChange
+		onDataChange,
+		versionId = null
 	}: Props = $props();
 
 	// Filter entries by selected module/feature
@@ -81,7 +85,94 @@
 		config: { l: '配置', c: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' }
 	};
 
-	function getEntryData(entry: ModuleEntry, key: string): string {
+	// Requirement traceability
+	let showRequirementSelector = $state(false);
+	let selectedParamForRequirement = $state<ModuleEntry | null>(null);
+	let paramRequirements = $state<Map<string, string[]>>(new Map());
+	let requirementList = $state<ModuleEntry[]>([]);
+	let requirementSearch = $state('');
+	let isLoadingRequirements = $state(false);
+	let paramRelations = $state<Map<string, Relation[]>>(new Map());
+
+	// Load requirements when selector opens
+	$effect(() => {
+		if (showRequirementSelector && selectedParamForRequirement) {
+			loadRequirements();
+			loadParamRelations(selectedParamForRequirement.id);
+		}
+	});
+
+	async function loadRequirements() {
+		isLoadingRequirements = true;
+		try {
+			const reqs = await getRequirementList(projectId, 1, 100, requirementSearch);
+			requirementList = reqs;
+		} catch (e: any) {
+			toast.error(e.message || '加载需求列表失败');
+		} finally {
+			isLoadingRequirements = false;
+		}
+	}
+
+	async function loadParamRelations(paramId: string) {
+		try {
+			const relations = await getRelationList(projectId, paramId, 'references');
+			paramRelations.set(paramId, relations);
+			paramRelations = new Map(paramRelations);
+			// Update paramRequirements map
+			const reqIds = relations.map(r => r.entityBId);
+			paramRequirements.set(paramId, reqIds);
+			paramRequirements = new Map(paramRequirements);
+		} catch (e: any) {
+			console.error('加载参数关系失败:', e);
+		}
+	}
+
+	async function toggleRequirementRelation(requirementId: string) {
+		if (!selectedParamForRequirement) return;
+		const paramId = selectedParamForRequirement.id;
+		const currentReqs = paramRequirements.get(paramId) || [];
+		const isLinked = currentReqs.includes(requirementId);
+
+		try {
+			if (isLinked) {
+				// Remove relation
+				const relations = paramRelations.get(paramId) || [];
+				const relation = relations.find(r => r.entityBId === requirementId);
+				if (relation) {
+					await deleteRelation(projectId, relation.id);
+				}
+				paramRequirements.set(paramId, currentReqs.filter(id => id !== requirementId));
+			} else {
+				// Create relation
+				await createRelation(projectId, {
+					entityAId: paramId,
+					entityBId: requirementId,
+					relationType: 'references',
+					confirmed: 1
+				});
+				paramRequirements.set(paramId, [...currentReqs, requirementId]);
+			}
+			paramRequirements = new Map(paramRequirements);
+			// Reload relations
+			await loadParamRelations(paramId);
+			toast.success(isLinked ? '已取消关联' : '已关联需求');
+		} catch (e: any) {
+			toast.error(e.message || '操作失败');
+		}
+	}
+
+	function openRequirementSelector(entry: ModuleEntry) {
+		selectedParamForRequirement = entry;
+		showRequirementSelector = true;
+	}
+
+	function handleRequirementChange(paramId: string, requirementIds: string[]) {
+		paramRequirements.set(paramId, requirementIds);
+		paramRequirements = new Map(paramRequirements);
+	}
+
+	function getEntryData(entry: ModuleEntry, key: string): any {
 		return (entry.data || entry.metadata || {})[key] ?? '';
 	}
 
@@ -262,6 +353,7 @@
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-200 dark:border-gray-700">
+						<th class="px-3 py-2 text-left text-xs font-medium text-gray-500">需求文档</th>
 						<th class="px-3 py-2 text-left text-xs font-medium text-gray-500">参数名</th>
 						<th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Key</th>
 						<th class="px-3 py-2 text-left text-xs font-medium text-gray-500">类型</th>
@@ -276,7 +368,12 @@
 				<tbody>
 					{#each filteredEntries as entry (entry.id)}
 						<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-							<td class="px-3 py-2 font-medium text-gray-900 dark:text-white">{entry.title}</td>
+							<td class="px-3 py-2">
+								<button class="text-xs text-purple-600 hover:text-purple-800 dark:text-purple-400 mr-2" onclick={() => openRequirementSelector(entry)}>
+									{paramRequirements.get(entry.id)?.length ?? 0 > 0 ? `已关联 ${paramRequirements.get(entry.id)?.length ?? 0} 个需求` : '关联需求'}
+								</button>
+							</td>
+								<td class="px-3 py-2 font-medium text-gray-900 dark:text-white">{entry.title}</td>
 							<td class="px-3 py-2 text-gray-600 dark:text-gray-400 font-mono text-xs">{getEntryData(entry, 'key')}</td>
 							<td class="px-3 py-2">
 								<span class="px-1.5 py-0.5 rounded text-xs {paramTypeMap[getEntryData(entry, 'paramType')]?.c || ''}">{paramTypeMap[getEntryData(entry, 'paramType')]?.l || getEntryData(entry, 'paramType')}</span>
@@ -300,7 +397,70 @@
 	{/if}
 </div>
 
-<!-- Edit drawer -->
+<!-- Requirement Selector Modal -->
+{#if showRequirementSelector && selectedParamForRequirement}
+	<div class="fixed inset-0 z-50 bg-black/30" onclick={() => { showRequirementSelector = false; selectedParamForRequirement = null; }}>
+		<div
+			class="fixed right-0 top-0 h-full w-96 bg-white dark:bg-gray-900 shadow-xl p-6 overflow-y-auto"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">关联需求文档</h3>
+			<p class="text-sm text-gray-500 dark:text-gray-400 mb-4">参数: {selectedParamForRequirement.title}</p>
+			
+			<!-- Search -->
+			<div class="mb-4">
+				<input
+					type="text"
+					class="w-full px-3 py-2 text-sm border rounded-lg border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+					placeholder="搜索需求..."
+					bind:value={requirementSearch}
+					oninput={() => loadRequirements()}
+				>
+			</div>
+			
+			<!-- Requirement List -->
+			{#if isLoadingRequirements}
+				<div class="flex items-center justify-center h-32 text-gray-400 dark:text-gray-500 text-sm">
+					加载中...
+				</div>
+			{:else if requirementList.length === 0}
+				<div class="flex items-center justify-center h-32 text-gray-400 dark:text-gray-500 text-sm">
+					暂无需求文档
+				</div>
+			{:else}
+				<div class="space-y-2">
+					{#each requirementList as req (req.id)}
+						{@const isLinked = (paramRequirements.get(selectedParamForRequirement.id) || []).includes(req.id)}
+						<div
+							class="p-3 rounded-lg border cursor-pointer transition-colors {isLinked ? 'border-purple-300 bg-purple-50 dark:border-purple-700 dark:bg-purple-900/20' : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50'}"
+							onclick={() => toggleRequirementRelation(req.id)}
+						>
+							<div class="flex items-center gap-2">
+								<input
+									type="checkbox"
+									checked={isLinked}
+									class="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
+									onclick={(e) => e.stopPropagation()}
+									onchange={() => toggleRequirementRelation(req.id)}
+								>
+								<div class="flex-1 min-w-0">
+									<div class="text-sm font-medium text-gray-900 dark:text-white truncate">{req.title}</div>
+									<div class="text-xs text-gray-500 dark:text-gray-400">{req.data?.requirementId || req.id}</div>
+								</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			
+			<div class="flex gap-2 mt-6">
+				<button class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg" onclick={() => { showRequirementSelector = false; selectedParamForRequirement = null; }}>关闭</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Edit Drawer -->
 {#if showEditDrawer && editEntry}
 	<div class="fixed inset-0 z-50 bg-black/30" onclick={() => { showEditDrawer = false; editEntry = null; }}>
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

@@ -117,6 +117,9 @@
 							const startDate = d.startDate ? new Date(d.startDate) : null;
 							const endDate = d.endDate ? new Date(d.endDate) : null;
 							if (!startDate) continue;
+							// Resolve version info
+							const versionId = entry.versionId || d.versionId;
+							const versionNumber = entry.currentVersionNumber || d.versionNumber;
 							pmEvents.push({
 								id: `pm-${entry.id}`,
 								calendar_id: `pm-${modType}`,
@@ -130,7 +133,7 @@
 								color: modType === 'roadmap' ? '#8b5cf6' : '#3b82f6',
 								location: null,
 								data: null,
-								meta: { pm_entry_id: entry.id, project_id: project.id, module_type: modType },
+								meta: { pm_entry_id: entry.id, project_id: project.id, module_type: modType, version_id: versionId, version_number: versionNumber },
 								is_cancelled: false,
 								attendees: [],
 								created_at: Date.now() * 1_000,

@@ -3,7 +3,7 @@
 	import type { NodeProps } from '@xyflow/svelte';
 	import TraceabilityBadge from './TraceabilityBadge.svelte';
 
-	let { id, data, selected }: NodeProps = $props();
+	let { id, data, selected, selectable }: NodeProps = $props();
 
 	// Derive visual properties from node type and data
 	let nodeType = $derived((data as Record<string, unknown>)?.type as string || 'process');

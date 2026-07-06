@@ -13,7 +13,7 @@
 		type EdgeTypes
 	} from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
-	import type { FlowchartData } from '$lib/apis/pm/types';
+	import type { FlowchartData, FlowchartNode } from '$lib/apis/pm/types';
 	import type { ModuleEntry } from '$lib/apis/pm/types';
 	import DynamicNode from './flowchart/DynamicNode.svelte';
 	import CustomEdge from './flowchart/CustomEdge.svelte';
@@ -96,11 +96,13 @@
 	// Track selected node for config panel via on:nodeclick / on:paneclick events
 	let selectedNodeId = $state<string | null>(null);
 	let selectedNodeData = $state<Record<string, unknown> | null>(null);
+	let activePanel = $state<'config' | 'traceability'>('config');
 
 	function onNodeClick(event: CustomEvent<{ node: Node; event: MouseEvent | TouchEvent }>) {
 		const node = event.detail.node;
 		selectedNodeId = node.id;
 		selectedNodeData = node.data as Record<string, unknown>;
+		activePanel = 'config';
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -126,7 +128,7 @@
 						style: (n.data as Record<string, unknown>)?.style as Record<string, unknown> | undefined,
 						inputParams: ((n.data as Record<string, unknown>)?.inputParams as string[]) || [],
 						outputParams: ((n.data as Record<string, unknown>)?.outputParams as string[]) || [],
-						traceability: ((n.data as Record<string, unknown>)?.traceability as Record<string, unknown>) || undefined
+						traceability: ((n.data as Record<string, unknown>)?.traceability as any) || undefined
 					}
 				})),
 				edges: es.map(e => ({
@@ -186,7 +188,7 @@
 		selectedNodeData = null;
 	}
 
-	function updateNodeData(nodeId: string, data: Record<string, unknown>) {
+	function updateNodeData(nodeId: string, data: Partial<FlowchartNode['data']>) {
 		nodesStore.update(ns => ns.map(n =>
 			n.id === nodeId
 				? { ...n, data: { ...n.data, ...data } }
@@ -251,7 +253,7 @@
 	{/if}
 
 	{#if selectedNodeId && selectedNodeData && !readonly}
-		{@const fcNode = {
+		{@const fcNode: FlowchartNode = {
 			id: selectedNodeId,
 			type: (selectedNodeData.type as string) || 'process',
 			position: { x: 0, y: 0 },
@@ -261,37 +263,39 @@
 				style: selectedNodeData.style as Record<string, unknown> | undefined,
 				inputParams: (selectedNodeData.inputParams as string[]) || [],
 				outputParams: (selectedNodeData.outputParams as string[]) || [],
-				traceability: selectedNodeData.traceability as Record<string, unknown> | undefined
+				traceability: selectedNodeData.traceability as any
 			}
 		}}
-		<NodeConfigPanel
-			node={fcNode}
-			{parameterEntries}
-			{projectId}
-			onUpdate={updateNodeData}
-			onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
-		/>
-	{/if}
-
-	{#if selectedNodeId && selectedNodeData}
-		<TraceabilitySidebar
-			nodeId={selectedNodeId}
-			nodeData={{
-				label: (selectedNodeData.label as string) || '',
-				description: selectedNodeData.description as string | undefined,
-				inputParams: (selectedNodeData.inputParams as string[]) || [],
-				outputParams: (selectedNodeData.outputParams as string[]) || [],
-				traceability: selectedNodeData.traceability as {
-					entityType: string;
-					entityId: string;
-					entityName: string;
-					versionNumber?: string;
-					boundAt: number;
-					boundBy?: string;
-				} | undefined
-			}}
-			{projectId}
-			onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
-		/>
+		{#if activePanel === 'config'}
+			<NodeConfigPanel
+				node={fcNode}
+				{parameterEntries}
+				{projectId}
+				onUpdate={updateNodeData}
+				onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
+				onViewTraceability={() => activePanel = 'traceability'}
+			/>
+		{:else}
+			<TraceabilitySidebar
+				nodeId={selectedNodeId}
+				nodeData={{
+					label: (selectedNodeData.label as string) || '',
+					description: selectedNodeData.description as string | undefined,
+					inputParams: (selectedNodeData.inputParams as string[]) || [],
+					outputParams: (selectedNodeData.outputParams as string[]) || [],
+					traceability: selectedNodeData.traceability as {
+						entityType: string;
+						entityId: string;
+						entityName: string;
+						versionNumber?: string;
+						boundAt: number;
+						boundBy?: string;
+					} | undefined
+				}}
+				{projectId}
+				onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
+				onViewConfig={() => activePanel = 'config'}
+			/>
+		{/if}
 	{/if}
 </div>
