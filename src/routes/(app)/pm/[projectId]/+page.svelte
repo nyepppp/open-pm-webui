@@ -79,6 +79,32 @@
 	let recentItems = $state<any[]>([]);
 	let isLoadingRecent = $state(true);
 
+	// Filter / Search / Pagination for recent activity
+	let searchQuery = $state('');
+	let filterModuleType = $state<string>('all');
+	let filterStatus = $state<string>('all');
+	let currentPage = $state(1);
+	const PAGE_SIZE = 20;
+
+	let filteredRecentItems = $derived(() => {
+		let result = recentItems;
+		if (searchQuery.trim()) {
+			const q = searchQuery.toLowerCase();
+			result = result.filter(e => (e.title || '').toLowerCase().includes(q));
+		}
+		if (filterModuleType !== 'all') {
+			result = result.filter(e => (e.module_type || e.moduleType) === filterModuleType);
+		}
+		if (filterStatus !== 'all') {
+			result = result.filter(e => (e.status || 'draft') === filterStatus);
+		}
+		return result;
+	});
+	let filteredRecent = $derived(filteredRecentItems());
+	let totalPages = $derived(Math.max(1, Math.ceil(filteredRecent.length / PAGE_SIZE)));
+	let pagedRecentItems = $derived(filteredRecent.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE));
+	$effect(() => { filteredRecent; if (currentPage > totalPages) currentPage = totalPages; });
+
 	// Traceability count
 	let traceabilityCount = $state(0);
 
@@ -277,14 +303,52 @@
 
 	<!-- Recent activity -->
 	<div class="mt-6">
-		<h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">最近更新</h3>
+		<div class="flex items-center justify-between mb-3">
+			<h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">最近更新</h3>
+			<span class="text-xs text-gray-400">{filteredRecent.length} 条</span>
+		</div>
+
+		<!-- Search & Filters -->
+		<div class="mb-3 flex flex-col sm:flex-row gap-2">
+			<div class="relative flex-1">
+				<svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+				</svg>
+				<input
+					type="text"
+					placeholder="搜索标题..."
+					class="w-full pl-9 pr-3 py-1.5 text-sm bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
+					bind:value={searchQuery}
+				/>
+			</div>
+			<select
+				class="px-3 py-1.5 text-sm bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
+				bind:value={filterModuleType}
+			>
+				<option value="all">全部模块</option>
+				{#each allModules as mod}
+					<option value={mod.id}>{mod.label}</option>
+				{/each}
+			</select>
+			<select
+				class="px-3 py-1.5 text-sm bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
+				bind:value={filterStatus}
+			>
+				<option value="all">全部状态</option>
+				<option value="draft">草稿</option>
+				<option value="review">评审中</option>
+				<option value="approved">已批准</option>
+				<option value="archived">已归档</option>
+			</select>
+		</div>
+
 		{#if isLoadingRecent}
 			<div class="flex items-center justify-center py-8"><div class="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400"></div></div>
-		{:else if recentItems.length === 0}
+		{:else if filteredRecent.length === 0}
 			<div class="py-8 text-center text-sm text-gray-400">暂无内容</div>
 		{:else}
 			<div class="bg-white dark:bg-gray-850 rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-50 dark:divide-gray-800">
-				{#each recentItems as item (item.id)}
+				{#each pagedRecentItems as item (item.id)}
 					<button
 						class="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition text-left"
 						onclick={() => goto(getModuleHref(item.module_type || item.moduleType))}
@@ -305,6 +369,27 @@
 					</button>
 				{/each}
 			</div>
+
+			<!-- Pagination -->
+			{#if totalPages > 1}
+				<div class="flex items-center justify-between mt-3 px-1">
+					<button
+						class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-850 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+						disabled={currentPage <= 1}
+						onclick={() => currentPage--}
+					>
+						上一页
+					</button>
+					<span class="text-sm text-gray-500 dark:text-gray-400">{currentPage} / {totalPages}</span>
+					<button
+						class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-850 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+						disabled={currentPage >= totalPages}
+						onclick={() => currentPage++}
+					>
+						下一页
+					</button>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>
