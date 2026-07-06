@@ -104,6 +104,7 @@
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
+	import PMDataSelector from '../pm/PMDataSelector.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -165,6 +166,7 @@
 	let selectedValvesType = 'tool'; // 'tool' or 'function'
 	let selectedValvesItemId = null;
 	let integrationsMenuCloseOnOutsideClick = true;
+	let showPMDataSelector = false;
 
 	$: if (!showValvesModal) {
 		integrationsMenuCloseOnOutsideClick = true;
@@ -1747,30 +1749,49 @@
 												aria-label={$i18n.t('Integrations')}
 											>
 												<Component className="size-4.5" strokeWidth="1.5" />
+										</button>
+									</IntegrationsMenu>
+									
+									<!-- PM Workbench Button -->
+									{#if showPMWorkbenchButton}
+										<Tooltip content="PM Workbench" placement="top">
+											<button
+												type="button"
+												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												aria-label="PM Workbench"
+												on:click={() => {
+													showPMDataSelector = true;
+												}}
+											>
+												<svg class="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+												</svg>
 											</button>
-										</IntegrationsMenu>
-									{/if}
-
-									{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
-										<div class="ml-1 flex gap-1.5">
-											<Tooltip content={$i18n.t('Valves')} placement="top">
-												<button
-													type="button"
-													id="model-valves-button"
-													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-													on:click={() => {
-														selectedValvesType = 'function';
-														selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
-														showValvesModal = true;
-													}}
-												>
-													<Knobs className="size-4" strokeWidth="1.5" />
-												</button>
 											</Tooltip>
-										</div>
-									{/if}
+										{/if}
+									</div>
+								{/if}
 
+								{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
 									<div class="ml-1 flex gap-1.5">
+										<Tooltip content={$i18n.t('Valves')} placement="top">
+											<button
+												type="button"
+												id="model-valves-button"
+												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												on:click={() => {
+													selectedValvesType = 'function';
+													selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
+													showValvesModal = true;
+												}}
+											>
+												<Knobs className="size-4" strokeWidth="1.5" />
+											</button>
+										</Tooltip>
+									</div>
+								{/if}
+
+								<div class="ml-1 flex gap-1.5">
 										{#if (selectedToolIds ?? []).length > 0}
 											<Tooltip
 												content={$i18n.t('{{COUNT}} Available Tools', {
@@ -2181,3 +2202,30 @@
 		</div>
 	</div>
 {/if}
+
+<PMDataSelector
+	bind:show={showPMDataSelector}
+	onSelect={(data) => {
+		const pmRef = {
+			id: `pm-${data.projectId}${data.id ? '-' + data.id : ''}`,
+			name: data.name,
+			type: data.type === 'pm-project' ? 'pm-project' : 'pm-entry',
+			status: 'processed',
+			url: `/pm/${data.projectId}`,
+			data: {
+				projectId: data.projectId,
+				projectName: data.projectName,
+				entryId: data.id,
+				entryTitle: data.name,
+				moduleType: data.moduleType
+			}
+		};
+		if (!files.find((f) => f.id === pmRef.id)) {
+			files = [...files, pmRef];
+		}
+		showPMDataSelector = false;
+	}}
+	onClose={() => {
+		showPMDataSelector = false;
+	}}
+/>
