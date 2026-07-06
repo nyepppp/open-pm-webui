@@ -435,3 +435,36 @@ Implemented unified /pm/architecture page with tab switching between mindmap and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: PM引用功能实现完成
+
+**Date**: 2026-07-06
+**Task**: PM引用功能实现完成
+**Branch**: `main`
+
+### Summary
+
+实现PM数据引用功能: 在MessageInput.svelte中添加PM引用按钮(PM Workbench启用时显示)、集成PMDataSelector组件实现项目/模块/条目三级浏览、通过files数组插入pm-entry类型引用、FileItem组件展示可删除的引用标签。完成B1.1-B1.4全部实施步骤并通过验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bd957bd74` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
