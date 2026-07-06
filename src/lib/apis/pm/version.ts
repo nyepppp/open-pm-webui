@@ -49,7 +49,7 @@ export function getEntryVersion(projectId: string, entryId: string, versionId: s
 	return getOne<EntryVersion>(`/projects/${projectId}/entries/${entryId}/versions/${versionId}`);
 }
 
-export function createEntryVersion(projectId: string, entryId: string, data: { changeSummary?: string; branchName?: string; projectVersionId?: string }) {
+export function createEntryVersion(projectId: string, entryId: string, data: { change_summary?: string; branch_name?: string; project_version_id?: string }) {
 	return create<EntryVersion>(`/projects/${projectId}/entries/${entryId}/versions`, data);
 }
 

@@ -5,7 +5,7 @@
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
 	import { getEntries, createEntry, deleteEntry, updateEntry, getEntry } from '$lib/apis/pm/index';
-	import { createCalendarEvent, getCalendars, deleteCalendarEvent } from '$lib/apis/calendar';
+	import { createCalendarEvent, getCalendars, deleteCalendarEvent, createCalendar } from '$lib/apis/calendar';
 	import { currentVersion, versions as versionList } from '$lib/stores/pm/versionStore';
 	import { createNewNote } from '$lib/apis/notes/index';
 	import { getModuleFields, getModuleEditorConfig, type ModuleEditorConfig } from '$lib/components/pm/moduleFields';
@@ -90,6 +90,7 @@
 			{ key: 'nodeType', label: '类型', width: 'w-20' },
 			{ key: 'currentVersionNumber', label: '版本', width: 'w-20' },
 			{ key: 'nodeStatus', label: '状态', width: 'w-20' },
+			{ key: 'startDate', label: '开始', width: 'w-24' }, { key: 'endDate', label: '结束', width: 'w-24' },
 			{ key: 'dependencies', label: '依赖', width: 'w-24' },
 			{ key: 'status', label: '状态', width: 'w-16' }, { key: 'updatedAt', label: '更新', width: 'w-24' }
 		]},
@@ -631,6 +632,8 @@
 	let calendarsList: any[] = $state([]);
 	let selectedCalendarId = $state('');
 	let calendarSyncResolve: ((calendarId: string | null) => void) | null = null;
+	let showCreateNewCalendar = $state(false);
+	let newCalendarName = $state('');
 
 	async function openEntryEditor(entryId: string) {
 		try {
@@ -831,9 +834,9 @@
 			const currentVer = $currentVersion;
 			console.log('[PM] Creating new version for entry', editingEntryId, 'projectVersion:', currentVer?.id);
 			await createEntryVersion(projectId, editingEntryId, {
-				changeSummary: `保存: ${editingDocTitle}`,
-				branchName: editingEntry?.branchName || 'main',
-				projectVersionId: currentVer?.id
+				change_summary: `保存: ${editingDocTitle}`,
+				branch_name: editingEntry?.branchName || 'main',
+				project_version_id: currentVer?.id
 			});
 			toast.success('新版本已创建');
 			await loadEntries();
@@ -878,7 +881,10 @@
 			
 			const startDate = d.startDate ? new Date(d.startDate) : null;
 			const endDate = d.endDate ? new Date(d.endDate) : (startDate ? new Date(startDate.getTime() + 86400000) : null);
-			if (!startDate || isNaN(startDate.getTime())) { toast.info('请先设置有效的开始日期，才能同步到日程'); return; }
+			if (!startDate || isNaN(startDate.getTime())) { 
+				toast.error('该条目缺少开始日期，请先设置开始日期后再同步到日程'); 
+				return; 
+			}
 			
 			const nodeType = d.nodeType || 'feature';
 			const nodeStatus = d.nodeStatus || 'planned';
@@ -948,18 +954,48 @@
 		});
 	}
 	
-	function handleCalendarSyncConfirm() {
-		showCalendarSyncDialog = false;
+	async function handleCalendarSyncConfirm() {
 		if (calendarSyncEntry?.type === 'select') {
-			calendarSyncResolve?.(selectedCalendarId);
+			// If creating new calendar
+			if (showCreateNewCalendar) {
+				if (!newCalendarName.trim()) {
+					toast.error('请输入日程名称');
+					return;
+				}
+				try {
+					const token = localStorage.token || '';
+					const newCalendar = await createCalendar(token, {
+						name: newCalendarName.trim(),
+						color: '#3b82f6'
+					});
+								if (newCalendar && newCalendar.id) {
+									selectedCalendarId = newCalendar.id;
+									calendarSyncResolve?.(newCalendar.id);
+								} else {
+						toast.error('创建日程失败');
+						calendarSyncResolve?.(null);
+					}
+				} catch (e: any) {
+					console.error('[PM] Failed to create calendar:', e);
+					toast.error(e.message || '创建日程失败');
+					calendarSyncResolve?.(null);
+				}
+			} else {
+				calendarSyncResolve?.(selectedCalendarId);
+			}
 		} else {
 			calendarSyncResolve?.('overwrite');
 		}
+		showCalendarSyncDialog = false;
+		showCreateNewCalendar = false;
+		newCalendarName = '';
 		calendarSyncEntry = null;
 	}
 	
 	function handleCalendarSyncCancel() {
 		showCalendarSyncDialog = false;
+		showCreateNewCalendar = false;
+		newCalendarName = '';
 		calendarSyncResolve?.(null);
 		calendarSyncEntry = null;
 	}
@@ -2778,7 +2814,7 @@
 	currentVersionNumber={editingEntry?.currentVersionNumber || 'v1.0'}
 	onClose={() => { showSaveVersionDialog = false; }}
 	onSaveNewVersion={async () => { showSaveVersionDialog = false; await saveAsNewVersion(); }}
-	onSaveContentOnly={() => { showSaveVersionDialog = false; toast.success('内容已保存'); }}
+	onSaveContentOnly={async () => { showSaveVersionDialog = false; await saveEntryContentOnly(); toast.success('内容已保存'); }}
 />
 
 <!-- SPEC: Template Selection Dialog -->
@@ -2885,6 +2921,25 @@
 							</label>
 						{/each}
 					</div>
+					{#if showCreateNewCalendar}
+						<div class="mt-4 p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+							<p class="text-sm text-gray-600 dark:text-gray-400 mb-2">创建新日程：</p>
+							<input
+								type="text"
+								placeholder="输入日程名称"
+								bind:value={newCalendarName}
+								class="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+							/>
+						</div>
+					{:else}
+						<button
+							class="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition flex items-center gap-1"
+							onclick={() => { showCreateNewCalendar = true; }}
+						>
+							<svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+							创建新日程
+						</button>
+					{/if}
 				{/if}
 			</div>
 			<div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
