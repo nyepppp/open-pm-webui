@@ -1,0 +1,366 @@
+{
+  "version": "1.0.0",
+  "description": "PM 文档质量检查规则库 - PRD 4 级检查体系",
+  "rules": [
+    {
+      "rule_id": "L1-001",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须包含概述章节",
+      "check_type": "required_section",
+      "target": "overview",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L1-002",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须包含目标章节",
+      "check_type": "required_section",
+      "target": "goals",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L1-003",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须包含功能需求章节",
+      "check_type": "required_section",
+      "target": "functional_requirements",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L1-004",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须包含非功能需求章节",
+      "check_type": "required_section",
+      "target": "non_functional_requirements",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L1-005",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须包含背景章节",
+      "check_type": "required_section",
+      "target": "background",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L1-006",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须包含附录或术语表",
+      "check_type": "required_section",
+      "target": "appendix",
+      "weight": 0.6
+    },
+    {
+      "rule_id": "L1-007",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须有明确的版本号",
+      "check_type": "required_field",
+      "target": "version",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L1-008",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须有作者信息",
+      "check_type": "required_field",
+      "target": "author",
+      "weight": 0.6
+    },
+    {
+      "rule_id": "L1-009",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须有日期信息",
+      "check_type": "required_field",
+      "target": "date",
+      "weight": 0.6
+    },
+    {
+      "rule_id": "L1-010",
+      "level": "L1",
+      "level_name": "内容存在性",
+      "category": "content_existence",
+      "description": "PRD 文档必须有目标用户定义",
+      "check_type": "required_section",
+      "target": "target_users",
+      "weight": 0.9
+    },
+    {
+      "rule_id": "L2-001",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "每个功能需求必须有优先级标注",
+      "check_type": "field_check",
+      "target": "requirement.priority",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L2-002",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "每个功能需求必须有验收标准",
+      "check_type": "field_check",
+      "target": "requirement.acceptance_criteria",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L2-003",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "参数配置必须有默认值",
+      "check_type": "field_check",
+      "target": "parameter.default_value",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L2-004",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "参数配置必须有数据类型说明",
+      "check_type": "field_check",
+      "target": "parameter.data_type",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L2-005",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "需求之间不能有矛盾描述",
+      "check_type": "consistency_check",
+      "target": "requirements.consistency",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L2-006",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "功能需求必须可追溯到业务目标",
+      "check_type": "traceability_check",
+      "target": "requirement.traceability",
+      "weight": 0.9
+    },
+    {
+      "rule_id": "L2-007",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "边界条件必须明确",
+      "check_type": "field_check",
+      "target": "requirement.boundary_conditions",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L2-008",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "异常场景必须覆盖",
+      "check_type": "field_check",
+      "target": "requirement.exception_scenarios",
+      "weight": 0.9
+    },
+    {
+      "rule_id": "L2-009",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "数据流必须清晰",
+      "check_type": "field_check",
+      "target": "requirement.data_flow",
+      "weight": 0.7
+    },
+    {
+      "rule_id": "L2-010",
+      "level": "L2",
+      "level_name": "逻辑完整性",
+      "category": "logic_completeness",
+      "description": "状态机转换必须完整",
+      "check_type": "field_check",
+      "target": "requirement.state_machine",
+      "weight": 0.7
+    },
+    {
+      "rule_id": "L3-001",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑错误处理方案",
+      "check_type": "field_check",
+      "target": "ux.error_handling",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L3-002",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑加载状态",
+      "check_type": "field_check",
+      "target": "ux.loading_state",
+      "weight": 0.9
+    },
+    {
+      "rule_id": "L3-003",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑移动端适配",
+      "check_type": "field_check",
+      "target": "ux.mobile_support",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L3-004",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑无障碍访问",
+      "check_type": "field_check",
+      "target": "ux.accessibility",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L3-005",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑国际化/本地化",
+      "check_type": "field_check",
+      "target": "ux.i18n",
+      "weight": 0.6
+    },
+    {
+      "rule_id": "L3-006",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑性能指标",
+      "check_type": "field_check",
+      "target": "ux.performance_metrics",
+      "weight": 0.9
+    },
+    {
+      "rule_id": "L3-007",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑用户反馈机制",
+      "check_type": "field_check",
+      "target": "ux.feedback_mechanism",
+      "weight": 0.7
+    },
+    {
+      "rule_id": "L3-008",
+      "level": "L3",
+      "level_name": "UX 启发式",
+      "category": "ux_heuristic",
+      "description": "必须考虑空状态",
+      "check_type": "field_check",
+      "target": "ux.empty_state",
+      "weight": 0.7
+    },
+    {
+      "rule_id": "L4-001",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有输入验证说明",
+      "check_type": "field_check",
+      "target": "security.input_validation",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L4-002",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有权限控制说明",
+      "check_type": "field_check",
+      "target": "security.permission_control",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L4-003",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有敏感数据处理说明",
+      "check_type": "field_check",
+      "target": "security.sensitive_data",
+      "weight": 1.0
+    },
+    {
+      "rule_id": "L4-004",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有审计日志说明",
+      "check_type": "field_check",
+      "target": "security.audit_log",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L4-005",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有数据加密说明",
+      "check_type": "field_check",
+      "target": "security.data_encryption",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L4-006",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有 rate limiting 说明",
+      "check_type": "field_check",
+      "target": "security.rate_limiting",
+      "weight": 0.7
+    },
+    {
+      "rule_id": "L4-007",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有 CSRF/XSS 防护说明",
+      "check_type": "field_check",
+      "target": "security.csrf_xss",
+      "weight": 0.8
+    },
+    {
+      "rule_id": "L4-008",
+      "level": "L4",
+      "level_name": "安全性",
+      "category": "security",
+      "description": "必须有数据备份恢复说明",
+      "check_type": "field_check",
+      "target": "security.backup_recovery",
+      "weight": 0.7
+    }
+  ]
+}

@@ -279,8 +279,7 @@
 							<td class="px-3 py-2 font-medium text-gray-900 dark:text-white">{entry.title}</td>
 							<td class="px-3 py-2 text-gray-600 dark:text-gray-400 font-mono text-xs">{getEntryData(entry, 'key')}</td>
 							<td class="px-3 py-2">
-								{@const pt = getEntryData(entry, 'paramType')}
-								<span class="px-1.5 py-0.5 rounded text-xs {paramTypeMap[pt]?.c || ''}">{paramTypeMap[pt]?.l || pt}</span>
+								<span class="px-1.5 py-0.5 rounded text-xs {paramTypeMap[getEntryData(entry, 'paramType')]?.c || ''}">{paramTypeMap[getEntryData(entry, 'paramType')]?.l || getEntryData(entry, 'paramType')}</span>
 							</td>
 							<td class="px-3 py-2 text-gray-600 dark:text-gray-400">{getEntryData(entry, 'dataType')}</td>
 							<td class="px-3 py-2 text-gray-600 dark:text-gray-400 text-xs">{getEntryData(entry, 'defaultValue') || '-'}</td>

@@ -1769,7 +1769,6 @@
 											</button>
 											</Tooltip>
 										{/if}
-									</div>
 								{/if}
 
 								{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}

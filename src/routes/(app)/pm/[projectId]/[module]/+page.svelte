@@ -903,8 +903,8 @@
 				calendar_id: calendarId,
 				title: `${entry.title} - ${typeLabel} - ${statusLabel}`,
 				description: `${moduleType === 'roadmap' ? '路线图' : '排期'}同步: ${entry.title} (${typeLabel}, ${statusLabel})${assignee ? ' · 负责人: ' + assignee : ''}`,
-				start_at: Math.floor(startDate.getTime() / 1000),
-				end_at: Math.floor((endDate || new Date(startDate.getTime() + 86400000)).getTime() / 1000),
+				start_at: Math.floor(startDate.getTime()) * 1_000_000,
+				end_at: Math.floor((endDate || new Date(startDate.getTime() + 86400000)).getTime()) * 1_000_000,
 				all_day: true,
 				data: { pm_entry_id: entry.id, project_id: projectId, module_type: moduleType }
 			});
@@ -1689,7 +1689,7 @@
 							{/each}{/if}
 							<td class="px-4 py-2.5 text-right"><div class="flex items-center justify-end gap-1">
 								{#if moduleType === 'roadmap' || moduleType === 'schedule'}
-									{@const isSynced = !!(entry.data?.calendarEventId || entry.metadata?.calendarEventId)}
+									{@const isSynced = !!((entry.data || entry.metadata || {}).calendarEventId)}
 									<button class="p-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition" title={isSynced ? '已同步到日程（点击更新）' : '同步到日程'} onclick={() => syncSingleToCalendar(entry)}>
 										<svg class="size-3.5 {isSynced ? 'text-blue-500' : 'text-gray-400 hover:text-blue-500'}" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75v7.5a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 26.25v-7.5M3 9h18M3 9l9-6 9 6" /></svg>
 									</button>

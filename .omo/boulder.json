@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "active_work_id": "refactor-architecture-module-73f4b080",
+  "works": {
+    "refactor-architecture-module-73f4b080": {
+      "work_id": "refactor-architecture-module-73f4b080",
+      "active_plan": "D:\\project\\pm-workspace\\open-pm-webui\\.omo\\plans\\refactor-architecture-module.md",
+      "plan_name": "refactor-architecture-module",
+      "status": "active",
+      "started_at": "2026-07-06T13:00:19.267Z",
+      "updated_at": "2026-07-06T13:00:19.267Z",
+      "session_ids": [
+        "opencode:ses_0c89868acffeHaLXG7q0vjKASV"
+      ],
+      "session_origins": {
+        "opencode:ses_0c89868acffeHaLXG7q0vjKASV": "direct"
+      },
+      "agent": "sisyphus",
+      "task_sessions": {}
+    }
+  },
+  "active_plan": "D:\\project\\pm-workspace\\open-pm-webui\\.omo\\plans\\refactor-architecture-module.md",
+  "started_at": "2026-07-06T13:00:19.267Z",
+  "status": "active",
+  "updated_at": "2026-07-06T13:00:19.267Z",
+  "session_ids": [
+    "opencode:ses_0c89868acffeHaLXG7q0vjKASV"
+  ],
+  "session_origins": {
+    "opencode:ses_0c89868acffeHaLXG7q0vjKASV": "direct"
+  },
+  "plan_name": "refactor-architecture-module",
+  "task_sessions": {},
+  "agent": "sisyphus"
+}

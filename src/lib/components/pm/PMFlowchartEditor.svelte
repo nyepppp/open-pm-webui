@@ -18,15 +18,17 @@
 	import DynamicNode from './flowchart/DynamicNode.svelte';
 	import CustomEdge from './flowchart/CustomEdge.svelte';
 	import NodeConfigPanel from './flowchart/NodeConfigPanel.svelte';
+	import TraceabilitySidebar from './flowchart/TraceabilitySidebar.svelte';
 
 	interface Props {
 		flowchartData: FlowchartData;
 		onChange: (data: FlowchartData) => void;
 		readonly?: boolean;
 		parameterEntries?: ModuleEntry[];
+		projectId?: string;
 	}
 
-	let { flowchartData, onChange, readonly = false, parameterEntries = [] }: Props = $props();
+	let { flowchartData, onChange, readonly = false, parameterEntries = [], projectId = '' }: Props = $props();
 
 	// Custom node types — must be stable (declared outside render cycle)
 	const nodeTypes: NodeTypes = {
@@ -123,7 +125,8 @@
 						description: (n.data as Record<string, unknown>)?.description as string | undefined,
 						style: (n.data as Record<string, unknown>)?.style as Record<string, unknown> | undefined,
 						inputParams: ((n.data as Record<string, unknown>)?.inputParams as string[]) || [],
-						outputParams: ((n.data as Record<string, unknown>)?.outputParams as string[]) || []
+						outputParams: ((n.data as Record<string, unknown>)?.outputParams as string[]) || [],
+						traceability: ((n.data as Record<string, unknown>)?.traceability as Record<string, unknown>) || undefined
 					}
 				})),
 				edges: es.map(e => ({
@@ -257,13 +260,37 @@
 				description: selectedNodeData.description as string | undefined,
 				style: selectedNodeData.style as Record<string, unknown> | undefined,
 				inputParams: (selectedNodeData.inputParams as string[]) || [],
-				outputParams: (selectedNodeData.outputParams as string[]) || []
+				outputParams: (selectedNodeData.outputParams as string[]) || [],
+				traceability: selectedNodeData.traceability as Record<string, unknown> | undefined
 			}
 		}}
 		<NodeConfigPanel
 			node={fcNode}
 			{parameterEntries}
+			{projectId}
 			onUpdate={updateNodeData}
+			onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
+		/>
+	{/if}
+
+	{#if selectedNodeId && selectedNodeData}
+		<TraceabilitySidebar
+			nodeId={selectedNodeId}
+			nodeData={{
+				label: (selectedNodeData.label as string) || '',
+				description: selectedNodeData.description as string | undefined,
+				inputParams: (selectedNodeData.inputParams as string[]) || [],
+				outputParams: (selectedNodeData.outputParams as string[]) || [],
+				traceability: selectedNodeData.traceability as {
+					entityType: string;
+					entityId: string;
+					entityName: string;
+					versionNumber?: string;
+					boundAt: number;
+					boundBy?: string;
+				} | undefined
+			}}
+			{projectId}
 			onClose={() => { selectedNodeId = null; selectedNodeData = null; }}
 		/>
 	{/if}

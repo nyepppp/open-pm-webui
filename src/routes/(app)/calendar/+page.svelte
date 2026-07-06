@@ -85,7 +85,7 @@
 	async function loadCalendars() {
 		try {
 			calendars = (await getCalendars(localStorage.token)) ?? [];
-			visibleCalendarIds = new Set(calendars.map((c) => c.id));
+			visibleCalendarIds = new Set([...calendars.map((c) => c.id), 'pm-schedule', 'pm-roadmap']);
 		} catch (err) {
 			console.error('loadCalendars', err);
 			calendars = [];
@@ -111,8 +111,9 @@
 						const entries = await getEntries(token, project.id, modType);
 						for (const entry of entries) {
 							const d = entry.data || entry.metadata || {};
-							// Skip entries already synced to calendar
-							if (d.calendarEventId) continue;
+							console.log('[Calendar] Entry data:', { id: entry.id, title: entry.title, data: d, startDate: d.startDate, endDate: d.endDate });
+							// Note: We now show all entries, even if synced to calendar
+							// if (d.calendarEventId) continue;
 							const startDate = d.startDate ? new Date(d.startDate) : null;
 							const endDate = d.endDate ? new Date(d.endDate) : null;
 							if (!startDate) continue;
@@ -122,8 +123,8 @@
 								user_id: '',
 								title: `[${project.name}] ${entry.title}`,
 								description: `${modType === 'roadmap' ? '路线图' : '排期'}: ${entry.title}`,
-								start_at: Math.floor(startDate.getTime() / 1000),
-								end_at: Math.floor((endDate || new Date(startDate.getTime() + 86400000)).getTime() / 1000),
+							start_at: startDate.getTime() * 1_000_000,
+							end_at: ((endDate || new Date(startDate.getTime() + 86400000)).getTime()) * 1_000_000,
 								all_day: true,
 								rrule: null,
 								color: modType === 'roadmap' ? '#8b5cf6' : '#3b82f6',
@@ -132,8 +133,8 @@
 								meta: { pm_entry_id: entry.id, project_id: project.id, module_type: modType },
 								is_cancelled: false,
 								attendees: [],
-								created_at: Math.floor(Date.now() / 1000),
-								updated_at: Math.floor(Date.now() / 1000)
+								created_at: Date.now() * 1_000,
+								updated_at: Date.now() * 1_000
 							});
 						}
 					}
@@ -142,6 +143,9 @@
 				}
 			}
 			events = [...events, ...pmEvents];
+			// Ensure PM calendar IDs are visible
+			// Add PM calendar IDs to visible set
+			visibleCalendarIds = new Set([...visibleCalendarIds, 'pm-schedule', 'pm-roadmap']);
 		} catch (err) {
 			console.warn('[Calendar] Failed to load PM projects', err);
 		}

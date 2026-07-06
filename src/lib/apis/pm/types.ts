@@ -519,7 +519,18 @@ export interface FlowchartNode {
 		style?: Partial<NodeStyle>;
 		inputParams?: string[];
 		outputParams?: string[];
+		traceability?: NodeTraceability;
 	};
+}
+
+export interface NodeTraceability {
+	entityType: 'prd' | 'module' | 'feature' | 'parameter' | 'none';
+	entityId: string;
+	entityName: string;
+	versionId?: string;
+	versionNumber?: string;
+	boundAt: number;
+	boundBy?: string;
 }
 
 export interface FlowchartEdge {
