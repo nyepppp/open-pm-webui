@@ -371,7 +371,7 @@
 			</div>
 
 			<!-- Pagination -->
-			{#if totalPages > 1}
+			{#if totalPages >= 1}
 				<div class="flex items-center justify-between mt-3 px-1">
 					<button
 						class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-850 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
