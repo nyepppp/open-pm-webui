@@ -1,7 +1,7 @@
 {
-  "id": "flow-traceability",
-  "name": "flow-traceability",
-  "title": "流程图溯源功能",
+  "id": "flow-traceability-fix",
+  "name": "flow-traceability-fix",
+  "title": "流程图溯源功能修复",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-06-flow-traceability-fix"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "07-06-flow-traceability",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

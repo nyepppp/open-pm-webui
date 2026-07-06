@@ -22,9 +22,10 @@
 		};
 		projectId: string;
 		onClose: () => void;
+		onViewConfig?: () => void;
 	}
 
-	let { nodeData, projectId, onClose }: Props = $props();
+	let { nodeData, projectId, onClose, onViewConfig }: Props = $props();
 
 	const entityTypeLabels: Record<string, string> = {
 		prd: 'PRD',
@@ -56,9 +57,19 @@
 <div class="absolute right-0 top-0 h-full w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto z-20 shadow-lg">
 	<div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
 		<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">节点详情</h3>
-		<button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" onclick={onClose}>
-			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-		</button>
+		<div class="flex items-center gap-2">
+			{#if onViewConfig}
+				<button 
+					class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+					onclick={onViewConfig}
+				>
+					查看配置
+				</button>
+			{/if}
+			<button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" onclick={onClose}>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+			</button>
+		</div>
 	</div>
 
 	<div class="p-3 space-y-4">
@@ -115,8 +126,14 @@
 					</button>
 				</div>
 			{:else}
-				<div class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-					该节点未绑定任何实体
+				<div class="text-center py-6">
+					<div class="mb-3">
+						<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+						</svg>
+					</div>
+					<p class="text-sm text-gray-500 dark:text-gray-400 mb-2">该节点未绑定任何实体</p>
+					<p class="text-xs text-gray-400 dark:text-gray-500">点击"查看配置"切换到配置面板，在"溯源绑定"标签页中进行绑定</p>
 				</div>
 			{/if}
 		</div>

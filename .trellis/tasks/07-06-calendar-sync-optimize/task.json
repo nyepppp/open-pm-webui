@@ -1,7 +1,7 @@
 {
-  "id": "flow-traceability",
-  "name": "flow-traceability",
-  "title": "流程图溯源功能",
+  "id": "calendar-sync-optimize",
+  "name": "calendar-sync-optimize",
+  "title": "日历同步优化：自动选择、时间拦截、roadmap时间展示",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -18,9 +18,7 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-06-flow-traceability-fix"
-  ],
+  "children": [],
   "parent": null,
   "relatedFiles": [],
   "notes": "",
