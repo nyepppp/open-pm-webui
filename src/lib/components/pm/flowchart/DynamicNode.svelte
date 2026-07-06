@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
 	import type { NodeProps } from '@xyflow/svelte';
+	import TraceabilityBadge from './TraceabilityBadge.svelte';
 
 	let { id, data, selected }: NodeProps = $props();
 
@@ -11,6 +12,7 @@
 	let inputParams = $derived(((data as Record<string, unknown>)?.inputParams as string[]) || []);
 	let outputParams = $derived(((data as Record<string, unknown>)?.outputParams as string[]) || []);
 	let style = $derived((data as Record<string, unknown>)?.style as Record<string, unknown> | undefined);
+	let traceability = $derived(((data as Record<string, unknown>)?.traceability as { entityType: string; entityId: string; entityName: string; versionNumber?: string } | undefined));
 
 	// Shape from style override or default based on type
 	let shape = $derived(
@@ -71,6 +73,7 @@
 					{/if}
 				</div>
 			{/if}
+			<TraceabilityBadge {traceability} />
 		</div>
 		<Handle type="target" position={Position.Top} id="target" class="!bg-gray-400 !w-2 !h-2 !border-0" />
 		<Handle type="source" position={Position.Bottom} id="source" class="!bg-gray-400 !w-2 !h-2 !border-0" />
@@ -99,6 +102,7 @@
 				{/if}
 			</div>
 		{/if}
+		<TraceabilityBadge {traceability} />
 		<Handle type="target" position={Position.Top} id="target" class="!bg-gray-400 !w-2 !h-2 !border-0" />
 		<Handle type="source" position={Position.Bottom} id="source" class="!bg-gray-400 !w-2 !h-2 !border-0" />
 	</div>

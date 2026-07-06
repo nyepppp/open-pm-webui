@@ -140,6 +140,23 @@ class PMRelation(Base):
     created_at = Column(BigInteger)
 
 
+class PMFlowchartTraceability(Base):
+    __tablename__ = 'pm_flowchart_traceability'
+
+    id = Column(Text, primary_key=True, unique=True)
+    node_id = Column(Text, nullable=False)
+    flowchart_id = Column(Text, nullable=False)
+    entity_type = Column(Text, nullable=False)  # "prd" | "module" | "feature" | "parameter" | "none"
+    entity_id = Column(Text, nullable=False)
+    entity_name = Column(Text, nullable=True)
+    version_id = Column(Text, nullable=True)
+    version_number = Column(Text, nullable=True)
+    bound_at = Column(BigInteger)
+    bound_by = Column(Text, nullable=True)
+    created_at = Column(BigInteger)
+    updated_at = Column(BigInteger)
+
+
 ####################
 # Pydantic Models
 ####################
@@ -352,6 +369,38 @@ class PMRelationForm(BaseModel):
     confirmed: Optional[int] = 1
     created_by: Optional[str] = None
     version_id: Optional[str] = None
+
+
+####################
+# Flowchart Traceability Pydantic Models
+####################
+
+class PMFlowchartTraceabilityModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    node_id: str
+    flowchart_id: str
+    entity_type: str
+    entity_id: str
+    entity_name: Optional[str] = None
+    version_id: Optional[str] = None
+    version_number: Optional[str] = None
+    bound_at: int
+    bound_by: Optional[str] = None
+    created_at: int
+    updated_at: int
+
+
+class PMFlowchartTraceabilityForm(BaseModel):
+    node_id: str
+    flowchart_id: str
+    entity_type: str
+    entity_id: str
+    entity_name: Optional[str] = None
+    version_id: Optional[str] = None
+    version_number: Optional[str] = None
+    bound_by: Optional[str] = None
 
 
 ####################
@@ -785,3 +834,109 @@ class PMRelations:
 
 PMEntities = PMEntities()
 PMRelations = PMRelations()
+
+
+class PMFlowchartTraceabilities:
+    async def insert_new_traceability(
+        self, form_data: PMFlowchartTraceabilityForm, db: Optional[AsyncSession] = None
+    ) -> Optional[PMFlowchartTraceabilityModel]:
+        async with get_async_db_context(db) as db:
+            trace = PMFlowchartTraceability(
+                id=str(uuid.uuid4()),
+                node_id=form_data.node_id,
+                flowchart_id=form_data.flowchart_id,
+                entity_type=form_data.entity_type,
+                entity_id=form_data.entity_id,
+                entity_name=form_data.entity_name,
+                version_id=form_data.version_id,
+                version_number=form_data.version_number,
+                bound_at=int(time.time_ns()),
+                bound_by=form_data.bound_by,
+                created_at=int(time.time_ns()),
+                updated_at=int(time.time_ns()),
+            )
+            db.add(trace)
+            await db.commit()
+            return PMFlowchartTraceabilityModel.model_validate(trace)
+
+    async def get_traceability_by_node_id(
+        self, node_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[PMFlowchartTraceabilityModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(PMFlowchartTraceability).where(PMFlowchartTraceability.node_id == node_id)
+            )
+            trace = result.scalar_one_or_none()
+            return PMFlowchartTraceabilityModel.model_validate(trace) if trace else None
+
+    async def get_traceabilities_by_flowchart_id(
+        self, flowchart_id: str, db: Optional[AsyncSession] = None
+    ) -> list[PMFlowchartTraceabilityModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(PMFlowchartTraceability)
+                .where(PMFlowchartTraceability.flowchart_id == flowchart_id)
+                .order_by(PMFlowchartTraceability.created_at.desc())
+            )
+            return [PMFlowchartTraceabilityModel.model_validate(t) for t in result.scalars().all()]
+
+    async def update_traceability_by_id(
+        self, trace_id: str, form_data: PMFlowchartTraceabilityForm, db: Optional[AsyncSession] = None
+    ) -> Optional[PMFlowchartTraceabilityModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(PMFlowchartTraceability).where(PMFlowchartTraceability.id == trace_id)
+            )
+            trace = result.scalar_one_or_none()
+            if not trace:
+                return None
+            update_data = form_data.model_dump(exclude_none=True)
+            if update_data:
+                update_data['updated_at'] = int(time.time_ns())
+                await db.execute(
+                    update(PMFlowchartTraceability)
+                    .where(PMFlowchartTraceability.id == trace_id)
+                    .values(**update_data)
+                )
+                await db.commit()
+            result = await db.execute(
+                select(PMFlowchartTraceability).where(PMFlowchartTraceability.id == trace_id)
+            )
+            trace = result.scalar_one_or_none()
+            return PMFlowchartTraceabilityModel.model_validate(trace) if trace else None
+
+    async def delete_traceability_by_id(
+        self, trace_id: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        async with get_async_db_context(db) as db:
+            await db.execute(delete(PMFlowchartTraceability).where(PMFlowchartTraceability.id == trace_id))
+            await db.commit()
+            return True
+
+    async def batch_insert_traceabilities(
+        self, form_data_list: list[PMFlowchartTraceabilityForm], db: Optional[AsyncSession] = None
+    ) -> list[PMFlowchartTraceabilityModel]:
+        async with get_async_db_context(db) as db:
+            traces = []
+            for form_data in form_data_list:
+                trace = PMFlowchartTraceability(
+                    id=str(uuid.uuid4()),
+                    node_id=form_data.node_id,
+                    flowchart_id=form_data.flowchart_id,
+                    entity_type=form_data.entity_type,
+                    entity_id=form_data.entity_id,
+                    entity_name=form_data.entity_name,
+                    version_id=form_data.version_id,
+                    version_number=form_data.version_number,
+                    bound_at=int(time.time_ns()),
+                    bound_by=form_data.bound_by,
+                    created_at=int(time.time_ns()),
+                    updated_at=int(time.time_ns()),
+                )
+                db.add(trace)
+                traces.append(trace)
+            await db.commit()
+            return [PMFlowchartTraceabilityModel.model_validate(t) for t in traces]
+
+
+PMFlowchartTraceabilities = PMFlowchartTraceabilities()
