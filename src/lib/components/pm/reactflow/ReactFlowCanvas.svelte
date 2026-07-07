@@ -1,9 +1,4 @@
 <script lang="ts">
-	// Import CSS at module level to ensure it's loaded
-	import '@xyflow/svelte/dist/style.css';
-	import { onMount, onDestroy } from 'svelte';
-	import { writable } from 'svelte/store';
-
 	interface Props {
 		nodes: any[];
 		edges: any[];
@@ -26,18 +21,11 @@
 		readonly = false 
 	}: Props = $props();
 
-	let container: HTMLDivElement;
-	let SvelteFlow: any = $state(null);
-	let Background: any = $state(null);
-	let Controls: any = $state(null);
-	let MiniMap: any = $state(null);
-	let Panel: any = $state(null);
-	let loadError = $state<string | null>(null);
-	let isLoading = $state(true);
-
-	// Local state for nodes and edges
 	let localNodes = $state<any[]>([]);
 	let localEdges = $state<any[]>([]);
+	let selectedNodeId = $state<string | null>(null);
+	let isDragging = $state(false);
+	let dragOffset = $state({ x: 0, y: 0 });
 
 	$effect(() => {
 		localNodes = nodes ? [...nodes] : [];
@@ -47,87 +35,150 @@
 		localEdges = edges ? [...edges] : [];
 	});
 
-	onMount(async () => {
-		if (!container) return;
-
-		try {
-			// Dynamically import ReactFlow Svelte components
-			const reactFlowModule = await import('@xyflow/svelte');
-			SvelteFlow = reactFlowModule.SvelteFlow;
-			if (!SvelteFlow) {
-				console.error('[ReactFlowCanvas] SvelteFlow not found in module');
-				loadError = 'SvelteFlow component not found in @xyflow/svelte module';
-				return;
-			}
-			Background = reactFlowModule.Background;
-			Controls = reactFlowModule.Controls;
-			MiniMap = reactFlowModule.MiniMap;
-			Panel = reactFlowModule.Panel;
-			
-			isLoading = false;
-		} catch (error: any) {
-			console.error('[ReactFlowCanvas] Failed to load @xyflow/svelte:', error);
-			loadError = error?.message || 'Failed to load ReactFlow library';
-			// Mark as loading complete even on error to prevent infinite loading
-			isLoading = false;
+	function getNodeShape(node: any) {
+		const shape = node.data?.shape || 'rectangle';
+		const width = node.style?.width ? parseInt(node.style.width) : 140;
+		const height = node.style?.height ? parseInt(node.style.height) : 60;
+		
+		switch (shape) {
+			case 'circle':
+				return `M ${node.position.x + width/2} ${node.position.y} A ${width/2} ${height/2} 0 1 1 ${node.position.x + width/2} ${node.position.y + height} A ${width/2} ${height/2} 0 1 1 ${node.position.x + width/2} ${node.position.y}`;
+			case 'diamond':
+				return `M ${node.position.x + width/2} ${node.position.y} L ${node.position.x + width} ${node.position.y + height/2} L ${node.position.x + width/2} ${node.position.y + height} L ${node.position.x} ${node.position.y + height/2} Z`;
+			case 'ellipse':
+				return `M ${node.position.x + width/2} ${node.position.y} A ${width/2} ${height/2} 0 1 1 ${node.position.x + width/2} ${node.position.y + height} A ${width/2} ${height/2} 0 1 1 ${node.position.x + width/2} ${node.position.y}`;
+			default:
+				// rectangle or rounded
+				const rx = shape === 'rounded' ? 12 : 0;
+				return `M ${node.position.x + rx} ${node.position.y} H ${node.position.x + width - rx} Q ${node.position.x + width} ${node.position.y} ${node.position.x + width} ${node.position.y + rx} V ${node.position.y + height - rx} Q ${node.position.x + width} ${node.position.y + height} ${node.position.x + width - rx} ${node.position.y + height} H ${node.position.x + rx} Q ${node.position.x} ${node.position.y + height} ${node.position.x} ${node.position.y + height - rx} V ${node.position.y + rx} Q ${node.position.x} ${node.position.y} ${node.position.x + rx} ${node.position.y}`;
 		}
-	});
-
-	function handleNodesChange(event: any) {
-		localNodes = event.detail || event;
-		onNodesChange?.(localNodes);
 	}
 
-	function handleEdgesChange(event: any) {
-		localEdges = event.detail || event;
-		onEdgesChange?.(localEdges);
+	function getEdgePath(edge: any) {
+		const sourceNode = localNodes.find(n => n.id === edge.source);
+		const targetNode = localNodes.find(n => n.id === edge.target);
+		if (!sourceNode || !targetNode) return '';
+
+		const sourceWidth = sourceNode.style?.width ? parseInt(sourceNode.style.width) : 140;
+		const sourceHeight = sourceNode.style?.height ? parseInt(sourceNode.style.height) : 60;
+		const targetWidth = targetNode.style?.width ? parseInt(targetNode.style.width) : 140;
+		const targetHeight = targetNode.style?.height ? parseInt(targetNode.style.height) : 60;
+
+		const sx = sourceNode.position.x + sourceWidth / 2;
+		const sy = sourceNode.position.y + sourceHeight / 2;
+		const tx = targetNode.position.x + targetWidth / 2;
+		const ty = targetNode.position.y + targetHeight / 2;
+
+		// Simple straight line for now, can be enhanced with bezier curves
+		return `M ${sx} ${sy} L ${tx} ${ty}`;
 	}
 
-	function handleConnect(event: any) {
-		onConnect?.(event.detail || event);
-	}
-
-	function handleNodeClick(event: any) {
-		onNodeClick?.(event.detail || event);
+	function handleNodeClick(event: MouseEvent, node: any) {
+		event.stopPropagation();
+		if (!readonly) {
+			selectedNodeId = node.id;
+		}
+		onNodeClick?.(node);
 	}
 
 	function handlePaneClick() {
+		selectedNodeId = null;
 		onPaneClick?.();
+	}
+
+	function handleNodeMouseDown(event: MouseEvent, node: any) {
+		if (readonly) return;
+		event.stopPropagation();
+		isDragging = true;
+		const rect = (event.target as Element).closest('svg')?.getBoundingClientRect();
+		if (rect) {
+			dragOffset.x = event.clientX - rect.left - node.position.x;
+			dragOffset.y = event.clientY - rect.top - node.position.y;
+		}
+	}
+
+	function handleMouseMove(event: MouseEvent) {
+		if (!isDragging || readonly || !selectedNodeId) return;
+		
+		const svg = (event.target as Element).closest('svg');
+		if (!svg) return;
+		const rect = svg.getBoundingClientRect();
+		const x = event.clientX - rect.left - dragOffset.x;
+		const y = event.clientY - rect.top - dragOffset.y;
+		
+		localNodes = localNodes.map(n => {
+			if (n.id === selectedNodeId) {
+				return { ...n, position: { x, y } };
+			}
+			return n;
+		});
+		onNodesChange?.(localNodes);
+	}
+
+	function handleMouseUp() {
+		isDragging = false;
 	}
 </script>
 
-<div bind:this={container} class="w-full h-full" style="min-height: 400px;">
-	{#if !isLoading && SvelteFlow}
-		<SvelteFlow
-			nodes={localNodes}
-			edges={localEdges}
-			on:nodesChange={handleNodesChange}
-			on:edgesChange={handleEdgesChange}
-			on:connect={handleConnect}
-			on:nodeClick={handleNodeClick}
-			on:paneClick={handlePaneClick}
-			fitView
-			zoomOnScroll={!readonly}
-			panOnDrag={!readonly}
-			selectNodesOnDrag={false}
-			deleteKey={readonly ? null : 'Delete'}
-		>
-			<Background patternColor="#e5e7eb" gap={20} />
-			<Controls />
-			<MiniMap />
-		</SvelteFlow>
-	{:else}
-		{#if loadError}
-			<div class="flex flex-col items-center justify-center h-full text-center p-4">
-				<svg class="w-10 h-10 text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-				<p class="text-sm text-red-500 dark:text-red-400 mb-2">加载流程图组件失败</p>
-				<p class="text-xs text-gray-500 mb-3">{loadError}</p>
-				<button class="px-3 py-1.5 text-xs bg-black text-white dark:bg-white dark:text-black rounded-lg transition" onclick={() => window.location.reload()}>刷新页面</button>
-			</div>
-		{:else}
-			<div class="w-full h-full flex items-center justify-center bg-gray-50">
-				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-			</div>
-		{/if}
-	{/if}
+<div class="w-full h-full" style="min-height: 400px;" onclick={handlePaneClick} role="presentation">
+	<svg 
+		class="w-full h-full" 
+		style="min-height: 400px; cursor: default;"
+		onmousemove={handleMouseMove}
+		onmouseup={handleMouseUp}
+	>
+		<defs>
+			<pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+				<path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e7eb" stroke-width="0.5"/>
+			</pattern>
+			<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+				<polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af"/>
+			</marker>
+		</defs>
+		<rect width="100%" height="100%" fill="url(#grid)"/>
+		
+		{#each localEdges as edge}
+			{@const pathD = getEdgePath(edge)}
+			{#if pathD}
+				<path 
+					d={pathD} 
+					fill="none" 
+					stroke="#9ca3af" 
+					stroke-width="2"
+					marker-end="url(#arrowhead)"
+				/>
+			{/if}
+		{/each}
+		
+		{#each localNodes as node}
+			{@const isSelected = selectedNodeId === node.id}
+			{@const shapePath = getNodeShape(node)}
+			{@const width = node.style?.width ? parseInt(node.style.width) : 140}
+			{@const height = node.style?.height ? parseInt(node.style.height) : 60}
+			<g 
+				class="cursor-pointer"
+				onclick={(e) => handleNodeClick(e, node)}
+				onmousedown={(e) => handleNodeMouseDown(e, node)}
+			>
+				<path 
+					d={shapePath}
+					fill={node.style?.backgroundColor || '#dbeafe'}
+					stroke={isSelected ? '#3b82f6' : (node.style?.borderColor || '#93c5fd')}
+					stroke-width={isSelected ? 3 : 2}
+				/>
+				<text 
+					x={node.position.x + width/2} 
+					y={node.position.y + height/2} 
+					text-anchor="middle" 
+					dominant-baseline="middle"
+					fill={node.style?.color || '#1f2937'}
+					font-size="14"
+					font-weight="500"
+					style="pointer-events: none;"
+				>
+					{node.data?.label || ''}
+				</text>
+			</g>
+		{/each}
+	</svg>
 </div>
