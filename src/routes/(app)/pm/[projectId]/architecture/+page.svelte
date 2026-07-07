@@ -11,11 +11,15 @@
 		saveArchitectureEntry, addManualModule, addManualFeature,
 		deleteManualModule, deleteManualFeature
 	} from '$lib/services/architectureService';
+	import ArchitectureTabBar from '$lib/components/pm/architecture/ArchitectureTabBar.svelte';
 	import ArchitectureLoading from '$lib/components/pm/architecture/ArchitectureLoading.svelte';
 	import ArchitectureError from '$lib/components/pm/architecture/ArchitectureError.svelte';
 	import ModuleFeatureTree from '$lib/components/pm/ModuleFeatureTree.svelte';
+	import ModuleFeatureManager from '$lib/components/pm/ModuleFeatureManager.svelte';
 	import ParameterTable from '$lib/components/pm/ParameterTable.svelte';
+	import ExcalidrawCanvas from '$lib/components/pm/excalidraw/ExcalidrawCanvas.svelte';
 	import PMVersionSelector from '$lib/components/pm/PMVersionSelector.svelte';
+	import { treeToExcalidraw } from '$lib/utils/excalidrawDataConverter';
 	import type { MindMapNode } from '$lib/apis/pm/types';
 
 	let projectId = $derived($page.params.projectId!);
@@ -24,6 +28,7 @@
 	let treeCollapsed = $state(false);
 	let showVersionSelector = $state(false);
 	let selectedVersion = $state<{ id: string; versionNumber: string; label?: string } | null>(null);
+	let activeTab = $state<'mindmap' | 'modules' | 'params'>('mindmap');
 
 	// Responsive: collapse tree on small screens
 	$effect(() => {
@@ -104,7 +109,7 @@
 					</span>
 				{/if}
 			</div>
-			<div class="flex w-full justify-end gap-1.5">
+			<div class="flex w-full justify-end gap-1.5 relative z-10">
 				<!-- Version Selector -->
 				<button
 					class="px-2 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition font-medium text-sm flex items-center"
@@ -123,18 +128,8 @@
 				</button>
 			</div>
 		</div>
-		<!-- Breadcrumb -->
-		<div class="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400 px-0.5">
-			<span class="hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer" onclick={() => { selectedModule = null; selectedFeature = null; }}>产品架构</span>
-			{#if selectedModule}
-				<span class="text-gray-300 dark:text-gray-600">/</span>
-				<span class="hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer" onclick={() => { selectedFeature = null; }}>{selectedModule}</span>
-			{/if}
-			{#if selectedFeature}
-				<span class="text-gray-300 dark:text-gray-600">/</span>
-				<span class="text-gray-700 dark:text-gray-300">{selectedFeature}</span>
-			{/if}
-		</div>
+		<!-- Tab Bar -->
+		<ArchitectureTabBar {activeTab} onTabChange={(tab) => { activeTab = tab; }} />
 	</div>
 
 	<!-- Content -->
@@ -143,48 +138,122 @@
 	{:else if $loadError}
 		<ArchitectureError error={$loadError} onRetry={() => retryLoadData(projectId)} />
 	{:else}
-		<div class="flex gap-3 h-[calc(100vh-200px)]">
-			<!-- Left: Module-Feature Tree -->
-			<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
-				<div class="flex items-center justify-between mb-2">
-					{#if !treeCollapsed}
-						<span class="text-sm font-medium text-gray-700 dark:text-gray-300">模块结构</span>
-					{/if}
-					<button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors" onclick={() => { treeCollapsed = !treeCollapsed; }} title={treeCollapsed ? '展开导航' : '收起导航'}>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							{#if treeCollapsed}
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-							{:else}
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+		<!-- Tab 1: Mind Map -->
+		{#if activeTab === 'mindmap'}
+			<div class="h-[calc(100vh-200px)] relative">
+				{#key $aggregatedTree}
+					<ExcalidrawCanvas
+						initialData={{
+							elements: treeToExcalidraw($aggregatedTree),
+							appState: { viewBackgroundColor: '#ffffff', gridSize: 20 }
+						}}
+						viewModeEnabled={true}
+						gridModeEnabled={true}
+					/>
+				{/key}
+			</div>
+		{/if}
+
+		<!-- Tab 2: Module/Feature Management -->
+		{#if activeTab === 'modules'}
+			<div class="h-[calc(100vh-200px)]">
+				<div class="flex gap-3 h-full">
+					<!-- Left: Module-Feature Tree -->
+					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
+						<div class="flex items-center justify-between mb-2">
+							{#if !treeCollapsed}
+								<span class="text-sm font-medium text-gray-700 dark:text-gray-300">模块结构</span>
 							{/if}
-						</svg>
-					</button>
+							<button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors" onclick={() => { treeCollapsed = !treeCollapsed; }} title={treeCollapsed ? '展开导航' : '收起导航'}>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									{#if treeCollapsed}
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+									{:else}
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+									{/if}
+								</svg>
+							</button>
+						</div>
+						<ModuleFeatureTree
+							modules={$aggregatedTree}
+							{selectedModule}
+							{selectedFeature}
+							onSelect={handleTreeSelect}
+							onAddModule={handleAddModule}
+							onAddFeature={handleAddFeature}
+							onDeleteModule={handleDeleteModule}
+							onDeleteFeature={handleDeleteFeature}
+							collapsed={treeCollapsed}
+							versionInfo={selectedVersion}
+						/>
+					</div>
+					<!-- Right: Module/Feature Description -->
+					<div class="flex-1 min-w-0 overflow-hidden">
+						<ModuleFeatureManager
+							modules={$aggregatedTree}
+							{projectId}
+							{selectedModule}
+							{selectedFeature}
+							archEntries={$archEntries}
+							onSelect={handleTreeSelect}
+							onAddModule={handleAddModule}
+							onAddFeature={handleAddFeature}
+							onDeleteModule={handleDeleteModule}
+							onDeleteFeature={handleDeleteFeature}
+							onDataChange={handleParamDataChange}
+						/>
+					</div>
 				</div>
-				<ModuleFeatureTree
-					modules={$aggregatedTree}
-					{selectedModule}
-					{selectedFeature}
-					onSelect={handleTreeSelect}
-					onAddModule={handleAddModule}
-					onAddFeature={handleAddFeature}
-					onDeleteModule={handleDeleteModule}
-					onDeleteFeature={handleDeleteFeature}
-					collapsed={treeCollapsed}
-					versionInfo={selectedVersion}
-				/>
 			</div>
-			<!-- Right: Parameter Table -->
-			<div class="flex-1 min-w-0 overflow-hidden">
-				<ParameterTable
-					entries={$parameterEntries}
-					{projectId}
-					filterModule={selectedModule}
-					filterFeature={selectedFeature}
-					onDataChange={handleParamDataChange}
-					versionId={selectedVersion?.id || null}
-				/>
+		{/if}
+
+		<!-- Tab 3: Parameter Table -->
+		{#if activeTab === 'params'}
+			<div class="h-[calc(100vh-200px)]">
+				<div class="flex gap-3 h-full">
+					<!-- Left: Module-Feature Tree -->
+					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
+						<div class="flex items-center justify-between mb-2">
+							{#if !treeCollapsed}
+								<span class="text-sm font-medium text-gray-700 dark:text-gray-300">模块结构</span>
+							{/if}
+							<button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors" onclick={() => { treeCollapsed = !treeCollapsed; }} title={treeCollapsed ? '展开导航' : '收起导航'}>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									{#if treeCollapsed}
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+									{:else}
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+									{/if}
+								</svg>
+							</button>
+						</div>
+						<ModuleFeatureTree
+							modules={$aggregatedTree}
+							{selectedModule}
+							{selectedFeature}
+							onSelect={handleTreeSelect}
+							onAddModule={handleAddModule}
+							onAddFeature={handleAddFeature}
+							onDeleteModule={handleDeleteModule}
+							onDeleteFeature={handleDeleteFeature}
+							collapsed={treeCollapsed}
+							versionInfo={selectedVersion}
+						/>
+					</div>
+					<!-- Right: Parameter Table -->
+					<div class="flex-1 min-w-0 overflow-hidden">
+						<ParameterTable
+							entries={$parameterEntries}
+							{projectId}
+							filterModule={selectedModule}
+							filterFeature={selectedFeature}
+							onDataChange={handleParamDataChange}
+							versionId={selectedVersion?.id || null}
+						/>
+					</div>
+				</div>
 			</div>
-		</div>
+		{/if}
 	{/if}
 </div>
 

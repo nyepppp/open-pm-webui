@@ -158,7 +158,7 @@
 				const tb = b.updated_at || b.updatedAt || 0;
 				return tb - ta;
 			});
-			recentItems = sorted.slice(0, 20);
+			recentItems = sorted;
 		} catch {
 			moduleCounts = {};
 			statusCounts = {};

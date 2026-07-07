@@ -121,7 +121,12 @@
 							class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700/50 transition {selectedEntity?.entityId === entity.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
 							onclick={() => handleEntitySelect(entity)}
 						>
-							<div class="font-medium text-gray-900 dark:text-gray-100">{entity.title || entity.name || '未命名'}</div>
+							<div class="font-medium text-gray-900 dark:text-gray-100">
+								{entity.title || entity.name || '未命名'}
+								{#if entity.currentVersionNumber || entity.version}
+									<span class="text-xs text-gray-500 dark:text-gray-400 ml-1">(v{entity.currentVersionNumber || entity.version})</span>
+								{/if}
+							</div>
 							{#if entity.description}
 								<div class="text-xs text-gray-500 dark:text-gray-400 truncate">{entity.description}</div>
 							{/if}

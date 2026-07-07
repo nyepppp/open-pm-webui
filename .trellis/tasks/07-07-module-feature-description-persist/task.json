@@ -1,7 +1,7 @@
 {
-  "id": "refactor-architecture-module",
-  "name": "refactor-architecture-module",
-  "title": "深度重构架构图模块",
+  "id": "module-feature-description-persist",
+  "name": "module-feature-description-persist",
+  "title": "模块/功能描述持久化",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -10,7 +10,7 @@
   "priority": "P2",
   "creator": "nye",
   "assignee": "nye",
-  "createdAt": "2026-07-06",
+  "createdAt": "2026-07-07",
   "completedAt": null,
   "branch": null,
   "base_branch": "main",
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-07-architecture-3tabs"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "07-07-architecture-3tabs",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

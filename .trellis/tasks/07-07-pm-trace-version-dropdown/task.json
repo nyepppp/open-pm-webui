@@ -1,7 +1,7 @@
 {
-  "id": "refactor-architecture-module",
-  "name": "refactor-architecture-module",
-  "title": "深度重构架构图模块",
+  "id": "pm-trace-version-dropdown",
+  "name": "pm-trace-version-dropdown",
+  "title": "PM工作台溯源下拉列表新增版本信息展示",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -10,7 +10,7 @@
   "priority": "P2",
   "creator": "nye",
   "assignee": "nye",
-  "createdAt": "2026-07-06",
+  "createdAt": "2026-07-07",
   "completedAt": null,
   "branch": null,
   "base_branch": "main",
@@ -18,9 +18,7 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-07-architecture-3tabs"
-  ],
+  "children": [],
   "parent": null,
   "relatedFiles": [],
   "notes": "",
