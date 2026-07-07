@@ -1,0 +1,6 @@
+{"file": "src/routes/(app)/pm/[projectId]/+page.svelte", "reason": "PM工作台主页面，包含模块入口导航，需要修复goto导航逻辑"}
+{"file": "src/routes/(app)/pm/[projectId]/architecture/+page.svelte", "reason": "架构页面，包含MindMapCanvas、ModuleFeatureTree、ModuleFeatureManager，需要性能优化和添加功能按钮修复"}
+{"file": "src/lib/components/pm/architecture/ModuleCard.svelte", "reason": "模块卡片组件，需要补充版本、更新时间、溯源信息，修复添加功能按钮"}
+{"file": "src/lib/components/pm/architecture/ModuleFeatureManager.svelte", "reason": "模块功能管理器，需要实现添加功能弹窗"}
+{"file": "src/lib/components/common/Modal.svelte", "reason": "项目通用弹窗组件，添加功能弹窗需要复用"}
+{"file": "src/lib/stores/pm/architectureStore.ts", "reason": "架构数据store，性能优化需要了解数据结构"}
