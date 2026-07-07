@@ -487,7 +487,7 @@
 			>
 				<option value="">所有版本</option>
 				{#each versions as ver (ver.id)}
-					<option value={ver.id}>{ver.versionNumber}{ver.label ? ` - ${ver.label}` : ''}</option>
+					<option value={ver.id}>{ver.versionNumber ?? ver.version_number}{ver.label ? ` - ${ver.label}` : ''}</option>
 				{/each}
 			</select>
 		{/if}

@@ -95,7 +95,7 @@
 					<div>
 						<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">回滚到版本</h2>
 						<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-							回滚到 {version?.versionNumber || '未知版本'} · {version ? formatDate(version.createdAt) : ''}
+							回滚到 {(version?.versionNumber ?? version?.version_number) || '未知版本'} · {version ? formatDate(version.createdAt ?? version.created_at) : ''}
 						</p>
 					</div>
 				</div>

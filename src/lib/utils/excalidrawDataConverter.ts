@@ -7,6 +7,11 @@ const NODE_TYPE_SHAPES: Record<string, string> = {
 	end: 'ellipse',
 	decision: 'diamond',
 	process: 'rectangle',
+	'rectangle': 'rectangle',
+	'rounded': 'rectangle',
+	'circle': 'ellipse',
+	'ellipse': 'ellipse',
+	'diamond': 'diamond',
 	'parameter-input': 'rectangle',
 	'parameter-output': 'rectangle',
 	default: 'rectangle'
@@ -227,88 +232,6 @@ export function isFlowchartNode(element: any): boolean {
 export function isFlowchartEdge(element: any): boolean {
 	return element.type === 'arrow' && !element.isDeleted;
 }
-
-/**
- * Convert TreeModule[] to Excalidraw elements for architecture mindmap
- */
-export function treeToExcalidraw(modules: TreeModule[]): any[] {
-	const elements: any[] = [];
-	const MODULE_WIDTH = 160;
-	const MODULE_HEIGHT = 80;
-	const FEATURE_WIDTH = 140;
-	const FEATURE_HEIGHT = 60;
-	const HORIZONTAL_SPACING = 200;
-	const VERTICAL_SPACING = 120;
-
-	// Create root node (Product)
-	const rootId = 'root-product';
-	const rootElement = {
-		id: rootId,
-		type: 'rectangle',
-		x: 400,
-		y: 50,
-		width: 120,
-		height: 60,
-		backgroundColor: '#dbeafe',
-		strokeColor: '#3b82f6',
-		strokeWidth: 2,
-		strokeStyle: 'solid',
-		fillStyle: 'solid',
-		roughness: 0,
-		opacity: 100,
-		angle: 0,
-		seed: Math.floor(Math.random() * 1000000),
-		version: 1,
-		versionNonce: Math.floor(Math.random() * 1000000),
-		updated: Date.now(),
-		isDeleted: false,
-		boundElements: null,
-		groupIds: [],
-		frameId: null,
-		link: null,
-		locked: false,
-		customData: {
-			type: 'root',
-			label: '产品',
-			moduleName: '',
-			featureName: ''
-		}
-	};
-	elements.push(rootElement);
-
-	// Add root text
-	const rootText = {
-		id: `text-${rootId}`,
-		type: 'text',
-		x: 400 + 10,
-		y: 50 + 20,
-		width: 100,
-		height: 20,
-		text: '产品',
-		fontSize: 16,
-		fontFamily: 'Virgil',
-		textAlign: 'center',
-		verticalAlign: 'middle',
-		strokeColor: '#1f2937',
-		backgroundColor: 'transparent',
-		strokeWidth: 1,
-		strokeStyle: 'solid',
-		fillStyle: 'solid',
-		roughness: 0,
-		opacity: 100,
-		angle: 0,
-		seed: Math.floor(Math.random() * 1000000),
-		version: 1,
-		versionNonce: Math.floor(Math.random() * 1000000),
-		updated: Date.now(),
-		isDeleted: false,
-		boundElements: [{ id: rootId, type: 'rectangle' }],
-		groupIds: [],
-		frameId: null,
-		link: null,
-		locked: false
-	};
-	elements.push(rootText);
 
 /**
  * Convert TreeModule[] to Excalidraw elements for architecture mindmap
@@ -634,13 +557,35 @@ export function treeToExcalidraw(modules: TreeModule[]): any[] {
 				link: null,
 				locked: false,
 				startBinding: { elementId: modId, focus: 0.5, gap: 4 },
-				endBinding: { elementId: featId, focus: 0.5, gap: 4 },
-				startArrowhead: null,
-				endArrowhead: 'arrow'
-			};
+			endBinding: { elementId: featId, focus: 0.5, gap: 4 },
+			startArrowhead: null,
+			endArrowhead: 'arrow'
+		};
 			elements.push(featArrowElement);
 		});
 	});
 
 	return elements;
+}
+
+/**
+ * Convert TreeModule[] to MindMap tree data structure
+ */
+export function treeToMindMap(modules: TreeModule[]): any {
+	return {
+		id: 'root',
+		name: '产品',
+		type: 'root',
+		children: modules.map(mod => ({
+			id: `mod-${mod.name}`,
+			name: mod.name,
+			type: 'module' as const,
+			children: mod.features.map(feat => ({
+				id: `feat-${mod.name}-${feat.name}`,
+				name: feat.name,
+				type: 'feature' as const,
+				data: feat
+			}))
+		}))
+	};
 }

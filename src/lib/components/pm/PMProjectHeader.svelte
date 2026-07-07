@@ -13,7 +13,7 @@
 
 	// Use project name from store or fallback
 	let displayName = $derived($currentProjectName || '未命名项目');
-	let currentVersionNumber = $derived($currentVersion?.versionNumber || 'v1.0');
+	let currentVersionNumber = $derived($currentVersion?.versionNumber ?? $currentVersion?.version_number ?? 'v1.0');
 	let totalVersions = $derived($versionCount || 1);
 </script>
 

@@ -104,7 +104,7 @@
 								class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
 								onclick={() => handleSelect(version)}
 								role="option"
-								aria-label="版本 {version.versionNumber}，{version.description || '无描述'}"
+								aria-label="版本 {(version.versionNumber ?? version.version_number)}，{(version.description || '无描述')}">
 							>
 								<div class="flex-shrink-0" aria-hidden="true">
 									<div class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
@@ -116,7 +116,7 @@
 								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2">
 										<span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-											{version.versionNumber}
+											{(version.versionNumber ?? version.version_number)}
 										</span>
 										{#if version.label}
 											<span class="px-2 py-0.5 text-xs rounded-full {getVersionLabelColor(version.label)}">
@@ -128,7 +128,7 @@
 										{version.description || '无描述'}
 									</p>
 									<p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-										{formatDate(version.createdAt)}
+										{formatDate(version.createdAt ?? version.created_at)}
 									</p>
 								</div>
 							</button>
