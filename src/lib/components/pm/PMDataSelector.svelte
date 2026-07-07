@@ -38,6 +38,8 @@
 		status: string;
 		priority?: string;
 		content?: string;
+		current_version_number?: string;
+		version?: number;
 	}
 
 	let projects: Project[] = [];
@@ -320,6 +322,9 @@
 									<div class="flex-1 min-w-0">
 										<div class="font-medium text-gray-900 dark:text-white truncate">
 											{entry.title}
+											{#if entry.current_version_number || entry.version}
+												<span class="text-xs text-gray-500 ml-1">(v{entry.current_version_number || entry.version})</span>
+											{/if}
 										</div>
 										<div class="flex items-center gap-2 mt-1">
 											<span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">

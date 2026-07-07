@@ -110,6 +110,14 @@
 		handleClose();
 	}
 
+	function getDisplayTitle(item: ModuleEntry): string {
+		const version = item.currentVersionNumber || item.version?.toString();
+		if (version) {
+			return `${item.title} (v${version})`;
+		}
+		return item.title;
+	}
+
 	function handleClear() {
 		onClear?.();
 	}
@@ -121,7 +129,7 @@
 		<div class="flex items-center gap-2">
 			<div class="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
 				<span class="text-xs text-blue-600 dark:text-blue-400 font-medium">{moduleLabels[targetModuleType]}</span>
-				<span class="text-sm text-gray-900 dark:text-gray-100">{selectedItem.title}</span>
+				<span class="text-sm text-gray-900 dark:text-gray-100">{getDisplayTitle(selectedItem)}</span>
 				<button
 					class="ml-1 p-0.5 text-gray-400 hover:text-red-500 dark:hover:text-red-400 rounded transition-colors"
 					onclick={handleClear}
@@ -215,7 +223,7 @@
 									</div>
 									<div class="flex-1 min-w-0">
 										<p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-											{item.title}
+											{getDisplayTitle(item)}
 										</p>
 										<p class="text-xs text-gray-500 dark:text-gray-400">
 											{item.id} · {new Date(item.updatedAt * 1000).toLocaleDateString('zh-CN')}

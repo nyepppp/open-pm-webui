@@ -158,16 +158,19 @@
 										: 'hover:bg-gray-50 dark:hover:bg-gray-800'}"
 									onclick={() => toggleEntry(entry.id)}
 								>
-									<div class="flex items-center gap-2">
-										<div class="w-4 h-4 rounded border {selectedEntries.includes(entry.id) ? 'bg-blue-500 border-blue-500' : 'border-gray-300 dark:border-gray-600'} flex items-center justify-center">
-											{#if selectedEntries.includes(entry.id)}
-												<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-													<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-												</svg>
+										<div class="flex items-center gap-2">
+											<div class="w-4 h-4 rounded border {selectedEntries.includes(entry.id) ? 'bg-blue-500 border-blue-500' : 'border-gray-300 dark:border-gray-600'} flex items-center justify-center">
+												{#if selectedEntries.includes(entry.id)}
+													<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
+														<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+													</svg>
+												{/if}
+											</div>
+											<span class="text-gray-800 dark:text-gray-200 truncate">{entry.title}</span>
+											{#if entry.currentVersionNumber || entry.version}
+												<span class="text-xs text-gray-500 dark:text-gray-400">(v{entry.currentVersionNumber || entry.version})</span>
 											{/if}
 										</div>
-										<span class="text-gray-800 dark:text-gray-200 truncate">{entry.title}</span>
-									</div>
 								</button>
 							{/each}
 						</div>
