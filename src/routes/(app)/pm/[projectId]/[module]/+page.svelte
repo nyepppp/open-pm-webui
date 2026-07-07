@@ -1893,6 +1893,14 @@
 						<div class="flex items-center gap-2 self-center justify-between">
 							<div class="text-sm font-medium capitalize flex-1 w-full line-clamp-1">{entry.title}</div>
 							<div class="flex shrink-0 items-center text-xs gap-2">
+								{#if true}
+									{@const cardVersionId = getEntryData(entry, 'versionId') || entry.versionId || (entry.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(entry.currentVersionNumber)) ? entry.currentVersionNumber : '')}
+									{@const cardVersion = cardVersionId ? $versionList.find((v: any) => v.id === cardVersionId) : null}
+									{@const cardVersionDisplay = cardVersion ? (cardVersion.versionNumber || cardVersion.version_number) : (cardVersionId && !/^[0-9a-f]{8}-/i.test(cardVersionId) ? cardVersionId : '')}
+									<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded-full {cardVersionDisplay ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400'}">
+										{cardVersionDisplay || '-'}
+									</span>
+								{/if}
 								{#if entry.priority}<span class="px-1.5 py-0.5 rounded text-xs {prioMap[entry.priority]?.c || ''}">{prioMap[entry.priority]?.l || ''}</span>{/if}
 								<span class="px-1.5 py-0.5 rounded text-xs {statusMap[entry.status]?.c || statusMap.draft.c}">{statusMap[entry.status]?.l || '草稿'}</span>
 								<span class="text-gray-500">{formatTime(entry.updated_at || entry.updatedAt)}</span>
