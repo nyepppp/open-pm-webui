@@ -244,7 +244,7 @@
 										: 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-200'}
 									{isItemFocused(`mod-${module.id}`) ? 'ring-2 ring-blue-500 ring-offset-1' : ''}
 								"
-								onclick={() => handleModuleClick(module.id, module.path)}
+											onclick={() => handleModuleClick(module.id, `/pm/${projectId}/${module.id}`)}
 								aria-current={activeModule === module.id ? 'page' : undefined}
 								tabindex="-1"
 							>

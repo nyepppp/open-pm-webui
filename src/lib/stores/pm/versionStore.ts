@@ -17,7 +17,7 @@ export const versionSearchQuery: Writable<string> = writable('');
 
 export const sortedVersions: Readable<Version[]> = derived(
 	versions,
-	$versions => [...$versions].sort((a, b) => b.createdAt - a.createdAt)
+	$versions => [...$versions].sort((a, b) => (b.createdAt ?? b.created_at ?? 0) - (a.createdAt ?? a.created_at ?? 0))
 );
 
 export const filteredVersions: Readable<Version[]> = derived(
@@ -29,9 +29,9 @@ export const filteredVersions: Readable<Version[]> = derived(
 		const lowerQuery = $query.toLowerCase();
 		return $sorted.filter(
 			v =>
-				v.versionNumber.toLowerCase().includes(lowerQuery) ||
-				v.description.toLowerCase().includes(lowerQuery) ||
-				v.label?.toLowerCase().includes(lowerQuery)
+				(v.versionNumber ?? v.version_number ?? '').toLowerCase().includes(lowerQuery) ||
+				(v.description ?? '').toLowerCase().includes(lowerQuery) ||
+				(v.label ?? '').toLowerCase().includes(lowerQuery)
 		);
 	}
 );

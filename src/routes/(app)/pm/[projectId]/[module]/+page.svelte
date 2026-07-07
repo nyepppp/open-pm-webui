@@ -105,6 +105,7 @@
 			{ key: 'audience', label: '受众', type: 'text' }, { key: 'relatedFeatures', label: '关联功能', type: 'select' }
 		]},
 		'product-architecture': { name: '产品架构', editorType: 'mindmap' },
+		architecture: { name: '产品架构', editorType: 'mindmap' },
 		prototype: { name: '原型/UI设计', editorType: 'table', tableColumns: [
 			{ key: 'priority', label: '优先级', width: 'w-16' }, { key: 'title', label: '名称' },
 			{ key: 'protoType', label: '类型', width: 'w-20' }, { key: 'description', label: '描述', width: 'w-32' },
@@ -320,7 +321,7 @@
 				data.data = { ...newFormData, title: newTitle };
 			} else if (moduleType === 'requirement-boundary') {
 				data.data = { ...newFormData, title: newTitle };
-			} else if (moduleType === 'product-architecture') {
+			} else if (moduleType === 'product-architecture' || moduleType === 'architecture') {
 				data.data = { nodes: [], title: newTitle };
 			} else if (moduleType === 'flowchart') {
 				data.data = { flowchart: { nodes: [], edges: [] }, title: newTitle };
@@ -341,7 +342,7 @@
 			const created = await createEntry(token, projectId, data);
 			resetForm(); await loadEntries(); toast.success('创建成功');
 			// Auto-open editor for competitor or product-architecture after create
-			if ((moduleType === 'competitor' || moduleType === 'product-architecture') && created?.id) {
+			if ((moduleType === 'competitor' || moduleType === 'product-architecture' || moduleType === 'architecture') && created?.id) {
 				openEntryEditor(created.id);
 			}
 		} catch (e: any) { toast.error(e.message || '创建失败'); }
@@ -831,6 +832,9 @@
 	async function saveAsNewVersion() {
 		if (!editingEntryId) { toast.error('没有正在编辑的文档'); return; }
 		try {
+			// First save the current content
+			await saveEntryContentOnly();
+			
 			const currentVer = $currentVersion;
 			console.log('[PM] Creating new version for entry', editingEntryId, 'projectVersion:', currentVer?.id);
 			await createEntryVersion(projectId, editingEntryId, {
@@ -1268,34 +1272,34 @@
 						/>
 						<PMFormTextarea label="" placeholder="遗留问题" rows="2" bind:value={newFormData.remainingIssues} />
 					{:else if moduleType === 'requirement-boundary'}
-						<PMFormInput label="" placeholder="场景" bind:value={newTitle} />
-						<PMFormTextarea label="" placeholder="功能" rows="2" bind:value={newFormData.function} />
-						<PMFormTextarea label="" placeholder="使用方式" rows="2" bind:value={newFormData.usage} />
-						<PMFormTextarea label="" placeholder="预期效果" rows="2" bind:value={newFormData.expectedEffect} />
-						<div class="flex gap-2">
-							<PMFormSelect
-								placeholder="关联需求（可选）"
-								options={requirementEntries.map((req: any) => {
-									const reqVid = req.versionId || getEntryData(req, 'versionId') || (req.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(req.currentVersionNumber)) ? req.currentVersionNumber : '');
-									const reqVersion = reqVid ? $versionList.find((v: any) => v.id === reqVid) : null;
-									const reqVn = reqVersion ? (reqVersion.versionNumber || reqVersion.version_number) : '';
-									return { value: req.id, label: `${req.title}${reqVn ? ' · ' + reqVn : ''} (${req.id.slice(0, 6)})` };
-								})}
-								bind:value={newFormData.relatedRequirements}
-								class="flex-1"
-							/>
-							<PMFormSelect
-								placeholder="关联参数（可选）"
-								options={parameterEntries.map((param: any) => {
-									const paramVid = param.versionId || getEntryData(param, 'versionId') || (param.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(param.currentVersionNumber)) ? param.currentVersionNumber : '');
-									const paramVersion = paramVid ? $versionList.find((v: any) => v.id === paramVid) : null;
-									const paramVn = paramVersion ? (paramVersion.versionNumber || paramVersion.version_number) : '';
-									return { value: param.id, label: `${param.title}${paramVn ? ' · ' + paramVn : ''} (${param.id.slice(0, 6)})` };
-								})}
-								bind:value={newFormData.relatedParameters}
-								class="flex-1"
-							/>
-						</div>
+											<PMFormInput label="" placeholder="场景" bind:value={newTitle} />
+											<PMFormTextarea label="" placeholder="功能描述" rows="2" bind:value={newFormData.function} />
+											<PMFormTextarea label="" placeholder="使用方式" rows="2" bind:value={newFormData.usage} />
+											<PMFormTextarea label="" placeholder="预期效果" rows="2" bind:value={newFormData.expectedEffect} />
+											<div class="flex gap-2">
+												<PMFormSelect
+													placeholder="关联需求（可选）"
+													options={requirementEntries.map((req: any) => {
+														const reqVid = req.versionId || getEntryData(req, 'versionId') || (req.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(req.currentVersionNumber)) ? req.currentVersionNumber : '');
+														const reqVersion = reqVid ? $versionList.find((v: any) => v.id === reqVid) : null;
+														const reqVn = reqVersion ? (reqVersion.versionNumber || reqVersion.version_number) : '';
+														return { value: req.id, label: `${req.title}${reqVn ? ' · ' + reqVn : ''} (${req.id.slice(0, 6)})` };
+													})}
+													bind:value={newFormData.relatedRequirements}
+													class="flex-1"
+												/>
+												<PMFormSelect
+													placeholder="关联参数（可选）"
+													options={parameterEntries.map((param: any) => {
+															const paramVid = param.versionId || getEntryData(param, 'versionId') || (param.currentVersionNumber && /^[0-9a-f]{8}-/i.test(String(param.currentVersionNumber)) ? param.currentVersionNumber : '');
+															const paramVersion = paramVid ? $versionList.find((v: any) => v.id === paramVid) : null;
+															const paramVn = paramVersion ? (paramVersion.versionNumber || paramVersion.version_number) : '';
+															return { value: param.id, label: `${param.title}${paramVn ? ' · ' + paramVn : ''} (${param.id.slice(0, 6)})` };
+														})}
+													bind:value={newFormData.relatedParameters}
+													class="flex-1"
+													/>
+											</div>
 					{:else}
 						<PMFormInput label="" placeholder={moduleType === 'roadmap' ? '节点名称' : '标题'} bind:value={newTitle} onkeydown={(e) => { if (e.key === 'Enter' && newTitle.trim()) handleCreate(); }} />
 						{#if isRichView || moduleType === 'meeting'}
@@ -1742,7 +1746,7 @@
 				</table>
 			</div>
 	{:else if isFormView || isMindmapView || isFlowchartView}
-		{#if moduleType === 'product-architecture'}
+		{#if moduleType === 'product-architecture' || moduleType === 'architecture'}
 			<!-- View toggle for product architecture -->
 			<div class="px-3.5 py-1 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800">
 				<span class="text-xs text-gray-500">视图：</span>
@@ -2350,7 +2354,7 @@
 					</div>
 				{:else if isMindmapView}
 					<div class="h-full flex flex-col">
-						{#if moduleType === 'product-architecture'}
+						{#if moduleType === 'product-architecture' || moduleType === 'architecture'}
 							<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
 								<span class="text-xs text-gray-500">版本：</span>
 								<span class="text-xs font-medium text-gray-700 dark:text-gray-300">{$currentVersion?.versionNumber || $currentVersion?.version_number || '默认版本'}</span>
@@ -2813,8 +2817,15 @@
 	open={showSaveVersionDialog}
 	currentVersionNumber={editingEntry?.currentVersionNumber || 'v1.0'}
 	onClose={() => { showSaveVersionDialog = false; }}
-	onSaveNewVersion={async () => { showSaveVersionDialog = false; await saveAsNewVersion(); }}
-	onSaveContentOnly={async () => { showSaveVersionDialog = false; await saveEntryContentOnly(); toast.success('内容已保存'); }}
+	onSaveNewVersion={async () => { 
+		showSaveVersionDialog = false; 
+		await saveAsNewVersion(); 
+	}}
+	onSaveContentOnly={async () => { 
+		showSaveVersionDialog = false; 
+		await saveEntryContentOnly(); 
+		toast.success('内容已保存'); 
+	}}
 />
 
 <!-- SPEC: Template Selection Dialog -->

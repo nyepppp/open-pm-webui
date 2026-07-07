@@ -44,7 +44,7 @@
 			await switchEntryVersion(projectId, entryId, version.id);
 			onVersionSwitch?.(version);
 			open = false;
-			toast.success(`已切换到 ${version.versionNumber}`);
+			toast.success(`已切换到 ${version.versionNumber || version.version_number}`);
 		} catch (e: any) {
 			toast.error(e?.message || '切换版本失败');
 		}
@@ -87,18 +87,18 @@
 				{:else}
 					{#each versions as v (v.id)}
 						<button
-							class="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors {v.versionNumber === currentVersionNumber ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
+							class="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors {(v.versionNumber ?? v.version_number) === currentVersionNumber ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
 							onclick={() => handleSwitch(v)}
 						>
 							<div class="flex items-center justify-between">
-								<span class="text-xs font-medium {v.versionNumber === currentVersionNumber ? 'text-blue-700 dark:text-blue-300' : 'text-gray-800 dark:text-gray-200'}">{v.versionNumber}</span>
-								<span class="text-[10px] text-gray-400">{formatTime(v.createdAt)}</span>
+								<span class="text-xs font-medium {(v.versionNumber ?? v.version_number) === currentVersionNumber ? 'text-blue-700 dark:text-blue-300' : 'text-gray-800 dark:text-gray-200'}">{v.versionNumber ?? v.version_number}</span>
+								<span class="text-[10px] text-gray-400">{formatTime(v.createdAt ?? v.created_at)}</span>
 							</div>
-							{#if v.changeSummary}
-								<p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{v.changeSummary}</p>
+							{#if v.changeSummary ?? v.change_summary}
+								<p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{v.changeSummary ?? v.change_summary}</p>
 							{/if}
-							{#if v.branchName && v.branchName !== 'main'}
-								<span class="inline-block mt-0.5 px-1.5 py-0 text-[9px] bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 rounded-full">{v.branchName}</span>
+							{#if (v.branchName ?? v.branch_name) && (v.branchName ?? v.branch_name) !== 'main'}
+								<span class="inline-block mt-0.5 px-1.5 py-0 text-[9px] bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 rounded-full">{v.branchName ?? v.branch_name}</span>
 							{/if}
 						</button>
 					{/each}

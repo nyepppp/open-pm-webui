@@ -36,7 +36,7 @@
 		loading = true;
 		try {
 			const result = await getEntryVersions(projectId, entryId);
-			versions = (result || []).sort((a, b) => b.createdAt - a.createdAt);
+			versions = (result || []).sort((a, b) => (b.createdAt ?? b.created_at) - (a.createdAt ?? a.created_at));
 			if (versions.length >= 2) {
 				oldVersionId = versions[1].id;
 				newVersionId = versions[0].id;
@@ -64,8 +64,8 @@
 			]);
 			oldContent = stripHtml(oldV.content || '');
 			newContent = stripHtml(newV.content || '');
-			oldVersionNumber = oldV.versionNumber;
-			newVersionNumber = newV.versionNumber;
+			oldVersionNumber = oldV.versionNumber ?? oldV.version_number ?? '';
+			newVersionNumber = newV.versionNumber ?? newV.version_number ?? '';
 			diffLines = computeDiff(oldContent, newContent);
 			
 			// Compute metadata diff
@@ -199,7 +199,7 @@
 				<option value="">选择旧版本</option>
 				{#each versions as v (v.id)}
 					{#if v.id !== newVersionId}
-						<option value={v.id}>{v.versionNumber} — {v.changeSummary || formatTime(v.createdAt)}</option>
+						<option value={v.id}>{(v.versionNumber ?? v.version_number)} — {(v.changeSummary ?? v.change_summary) || formatTime(v.createdAt ?? v.created_at)}</option>
 					{/if}
 				{/each}
 			</select>
@@ -211,7 +211,7 @@
 				<option value="">选择新版本</option>
 				{#each versions as v (v.id)}
 					{#if v.id !== oldVersionId}
-						<option value={v.id}>{v.versionNumber} — {v.changeSummary || formatTime(v.createdAt)}</option>
+						<option value={v.id}>{(v.versionNumber ?? v.version_number)} — {(v.changeSummary ?? v.change_summary) || formatTime(v.createdAt ?? v.created_at)}</option>
 					{/if}
 				{/each}
 			</select>

@@ -16,7 +16,7 @@
 
 	let nodeLabel = $state(node.data.label);
 	let nodeDescription = $state(node.data.description || '');
-	let selectedShape = $state(node.data.style?.shape || 'rounded');
+	let selectedShape = $state(node.data.style?.shape || 'rectangle');
 	let bgColor = $state(node.data.style?.backgroundColor || '');
 	let borderColor = $state(node.data.style?.borderColor || '');
 	let selectedInputParams = $state<string[]>(node.data.inputParams || []);
@@ -77,7 +77,7 @@
 	}
 </script>
 
-<div class="absolute right-0 top-0 h-full w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto z-20 shadow-lg">
+<div class="absolute right-0 top-0 h-full w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto z-[1000] shadow-lg">
 	<div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
 		<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">节点配置</h3>
 		<div class="flex items-center gap-2">

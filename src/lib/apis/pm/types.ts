@@ -56,6 +56,11 @@ export interface Version {
 	snapshotPath: string;
 	createdBy?: string;
 	createdAt: number;
+	// snake_case aliases from backend API
+	project_id?: string;
+	version_number?: string;
+	created_by?: string;
+	created_at?: number;
 }
 
 export interface ModuleEntry {
@@ -91,6 +96,17 @@ export interface EntryVersion {
 	projectVersionId?: string;
 	createdBy: string;
 	createdAt: number;
+	// snake_case aliases from backend API
+	entry_id?: string;
+	project_id?: string;
+	module_type?: ModuleType;
+	version_number?: string;
+	parent_id?: string | null;
+	branch_name?: string;
+	change_summary?: string;
+	project_version_id?: string;
+	created_by?: string;
+	created_at?: number;
 }
 
 // Version branch

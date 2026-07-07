@@ -83,15 +83,15 @@
 				</div>
 				<div class="flex items-center gap-4 mt-3">
 					<div class="flex-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-						<div class="text-sm font-medium text-blue-700 dark:text-blue-300">{versionA?.versionNumber || '版本 A'}</div>
-						<div class="text-xs text-blue-500 dark:text-blue-400 mt-1">{versionA ? formatDate(versionA.createdAt) : ''}</div>
+						<div class="text-sm font-medium text-blue-700 dark:text-blue-300">{(versionA?.versionNumber ?? versionA?.version_number) || '版本 A'}</div>
+						<div class="text-xs text-blue-500 dark:text-blue-400 mt-1">{versionA ? formatDate(versionA.createdAt ?? versionA.created_at) : ''}</div>
 					</div>
 					<svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
 					</svg>
 					<div class="flex-1 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-						<div class="text-sm font-medium text-green-700 dark:text-green-300">{versionB?.versionNumber || '版本 B'}</div>
-						<div class="text-xs text-green-500 dark:text-green-400 mt-1">{versionB ? formatDate(versionB.createdAt) : ''}</div>
+						<div class="text-sm font-medium text-green-700 dark:text-green-300">{(versionB?.versionNumber ?? versionB?.version_number) || '版本 B'}</div>
+						<div class="text-xs text-green-500 dark:text-green-400 mt-1">{versionB ? formatDate(versionB.createdAt ?? versionB.created_at) : ''}</div>
 					</div>
 				</div>
 			</div>

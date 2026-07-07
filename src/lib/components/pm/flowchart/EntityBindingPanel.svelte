@@ -40,7 +40,8 @@
 		try {
 			const typeConfig = entityTypes.find(t => t.value === selectedType);
 			if (!typeConfig) return;
-			const result = await getEntries(projectId, typeConfig.module);
+			const token = (typeof localStorage !== 'undefined' && localStorage.token) || '';
+			const result = await getEntries(token, projectId, typeConfig.module);
 			entities = Array.isArray(result) ? result : [];
 		} catch (e) {
 			toast.error('加载实体失败');
