@@ -568,3 +568,36 @@ Implemented unified /pm/architecture page with tab switching between mindmap and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: 架构脑图交互增强 (R1-R6)
+
+**Date**: 2026-07-07
+**Task**: 架构脑图交互增强 (R1-R6)
+**Branch**: `main`
+
+### Summary
+
+MindMapCanvas.svelte 重构：实现R1-HTML tooltip、R2-点击选中高亮(glow filter)、R3-ResizeObserver自适应+双侧对称布局、R4-来源标识圆点、R5-CJK自适应截断、R6-D3 data join增量更新。修复Svelte class:指令Tailwind斜杠解析问题，安装d3-interpolate-path依赖。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `747e9ef9d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

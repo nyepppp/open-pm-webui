@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~570 | Active |
+| `journal-1.md` | ~603 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-07 | 架构脑图交互增强 (R1-R6) | `747e9ef9d` | `main` |
 | 17 | 2026-07-07 | 架构页面性能优化与交互修复 | `c489b1a6c` | `main` |
 | 16 | 2026-07-07 | PM工作台交互与UI修复 | `8776fde72` | `main` |
 | 15 | 2026-07-07 | 修复版本保存功能 | `f2d39d11c`, `ecc1026c0` | `main` |
