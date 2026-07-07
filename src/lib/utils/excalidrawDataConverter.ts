@@ -580,6 +580,7 @@ export function treeToMindMap(modules: TreeModule[]): any {
 			id: `mod-${mod.name}`,
 			name: mod.name,
 			type: 'module' as const,
+			data: { source: mod.source, featureCount: mod.features.length },
 			children: mod.features.map(feat => ({
 				id: `feat-${mod.name}-${feat.name}`,
 				name: feat.name,
