@@ -7,7 +7,7 @@
 	import { currentVersion, versions as versionList } from '$lib/stores/pm/versionStore';
 	import { agentStatus, refreshAgentStatus, hasModels } from '$lib/stores/pm/agentChatStore';
 
-	let projectId = $derived($page.params.projectId);
+	let projectId = $derived($page.params.projectId || '');
 
 	// SVG icon paths (Heroicons outline, 24x24)
 	const svgIcons: Record<string, string> = {
@@ -15,7 +15,7 @@
 		requirement: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z',
 		roadmap: 'M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z',
 		parameter: 'M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75',
-		'product-architecture': 'M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9',
+		architecture: 'M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9',
 		competitor: 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z',
 		testcase: 'M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5',
 		risk: 'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z',
@@ -39,8 +39,8 @@
 		},
 		{
 			id: 'design', label: '设计', modules: [
-				{ id: 'parameter', label: '参数配置', desc: '参数清单管理', href: `/pm/${projectId}/parameter` },
-				{ id: 'product-architecture', label: '产品架构', desc: '架构设计', href: `/pm/${projectId}/product-architecture` },
+			{ id: 'parameter', label: '参数配置', desc: '参数清单管理', href: `/pm/${projectId}/parameter` },
+			{ id: 'architecture', label: '产品架构', desc: '架构设计', href: `/pm/${projectId}/architecture` },
 				{ id: 'prototype', label: '原型/UI设计', desc: '设计稿与评审', href: `/pm/${projectId}/prototype` },
 				{ id: 'competitor', label: '竞品分析', desc: '竞品对比矩阵', href: `/pm/${projectId}/competitor` },
 				{ id: 'spec', label: 'SPEC 规范', desc: '规范文档管理', href: `/pm/${projectId}/spec` },
@@ -189,7 +189,7 @@
 
 	function getVersionLabel(vid: string): string {
 		const v = $versionList.find((v: any) => v.id === vid);
-		return v?.versionNumber || v?.version_number || vid.slice(0, 6);
+		return v?.versionNumber || vid.slice(0, 6);
 	}
 </script>
 
@@ -250,7 +250,7 @@
 			<!-- Current version card -->
 			<a href="/pm/{projectId}/versions" class="bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800/50 p-4 block hover:bg-blue-100 dark:hover:bg-blue-900/30 transition">
 				<div class="text-xs text-blue-600 dark:text-blue-400 mb-1">当前版本</div>
-				<div class="text-2xl font-bold text-blue-700 dark:text-blue-300">{$currentVersion?.versionNumber || $currentVersion?.version_number || '-'}</div>
+				<div class="text-2xl font-bold text-blue-700 dark:text-blue-300">{$currentVersion?.versionNumber || '-'}</div>
 				{#if $currentVersion?.label}
 					<div class="text-xs text-blue-500 mt-0.5">{$currentVersion.label}</div>
 				{/if}
@@ -280,7 +280,11 @@
 					{#each group.modules as mod (mod.id)}
 						<button
 							class="flex items-center gap-3 p-4 bg-white dark:bg-gray-850 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700 hover:shadow-sm transition text-left"
-							onclick={() => goto(mod.href)}
+							type="button"
+							onclick={(e) => {
+								e.preventDefault();
+								goto(mod.href);
+							}}
 						>
 							<div class="flex-shrink-0 w-5 h-5 text-gray-500 dark:text-gray-400">
 								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">

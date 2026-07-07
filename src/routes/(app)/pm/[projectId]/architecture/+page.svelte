@@ -15,11 +15,11 @@
 	import ArchitectureLoading from '$lib/components/pm/architecture/ArchitectureLoading.svelte';
 	import ArchitectureError from '$lib/components/pm/architecture/ArchitectureError.svelte';
 	import ModuleFeatureTree from '$lib/components/pm/ModuleFeatureTree.svelte';
-	import ModuleFeatureManager from '$lib/components/pm/ModuleFeatureManager.svelte';
+	import ModuleFeatureManager from '$lib/components/pm/architecture/ModuleFeatureManager.svelte';
 	import ParameterTable from '$lib/components/pm/ParameterTable.svelte';
-	import ExcalidrawCanvas from '$lib/components/pm/excalidraw/ExcalidrawCanvas.svelte';
+	import MindMapCanvas from '$lib/components/pm/mindmap/MindMapCanvas.svelte';
 	import PMVersionSelector from '$lib/components/pm/PMVersionSelector.svelte';
-	import { treeToExcalidraw } from '$lib/utils/excalidrawDataConverter';
+	import { treeToMindMap } from '$lib/utils/excalidrawDataConverter';
 	import type { MindMapNode } from '$lib/apis/pm/types';
 
 	let projectId = $derived($page.params.projectId!);
@@ -32,10 +32,19 @@
 
 	// Responsive: collapse tree on small screens
 	$effect(() => {
-		function onResize() { if (window.innerWidth < 768 && !treeCollapsed) treeCollapsed = true; }
+		let resizeTimer: ReturnType<typeof setTimeout>;
+		function onResize() {
+			clearTimeout(resizeTimer);
+			resizeTimer = setTimeout(() => {
+				if (window.innerWidth < 768 && !treeCollapsed) treeCollapsed = true;
+			}, 200);
+		}
 		onResize();
 		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
+		return () => {
+			clearTimeout(resizeTimer);
+			window.removeEventListener('resize', onResize);
+		};
 	});
 
 	onMount(() => { loadData(projectId); });
@@ -141,16 +150,25 @@
 		<!-- Tab 1: Mind Map -->
 		{#if activeTab === 'mindmap'}
 			<div class="h-[calc(100vh-200px)] relative">
-				{#key $aggregatedTree}
-					<ExcalidrawCanvas
-						initialData={{
-							elements: treeToExcalidraw($aggregatedTree),
-							appState: { viewBackgroundColor: '#ffffff', gridSize: 20 }
-						}}
-						viewModeEnabled={true}
-						gridModeEnabled={true}
-					/>
-				{/key}
+				<MindMapCanvas
+					data={treeToMindMap($aggregatedTree)}
+					version={selectedVersion?.versionNumber}
+					onNodeClick={(node) => {
+						if (node.type === 'module') {
+							selectedModule = node.name;
+							selectedFeature = null;
+						} else if (node.type === 'feature') {
+							// Find parent module
+							const parentModule = $aggregatedTree.find(m => 
+								m.features.some(f => f.name === node.name)
+							);
+							if (parentModule) {
+								selectedModule = parentModule.name;
+								selectedFeature = node.name;
+							}
+						}
+					}}
+				/>
 			</div>
 		{/if}
 
