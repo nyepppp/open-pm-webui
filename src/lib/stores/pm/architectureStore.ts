@@ -1,6 +1,6 @@
 import { writable, derived, type Writable, type Readable } from 'svelte/store';
 import { getEntries } from '$lib/apis/pm/index';
-import type { ModuleEntry, MindMapNode } from '$lib/apis/pm/types';
+import type { ModuleEntry, MindMapNode, Parameter } from '$lib/apis/pm/types';
 
 // ============================================================================
 // Types
@@ -10,12 +10,16 @@ export interface TreeModule {
 	name: string;
 	source: 'auto' | 'manual';
 	features: TreeFeature[];
+	versionId?: string;
+	updatedAt?: number;
+	createdAt?: number;
 }
 
 export interface TreeFeature {
 	name: string;
 	source: 'auto' | 'manual';
 	paramCount: number;
+	parameters?: Parameter[];
 }
 
 // ============================================================================
