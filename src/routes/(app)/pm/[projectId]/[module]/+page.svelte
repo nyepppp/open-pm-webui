@@ -322,7 +322,21 @@
 			} else if (moduleType === 'requirement-boundary') {
 				data.data = { ...newFormData, title: newTitle };
 			} else if (moduleType === 'product-architecture' || moduleType === 'architecture') {
-				data.data = { nodes: [], title: newTitle };
+				data.data = { 
+					nodes: [{
+						id: 'root',
+						label: newTitle || '产品架构',
+						type: 'root',
+						position: { x: 400, y: 50 },
+						parentId: null,
+						metadata: { source: 'manual' },
+						projectId: projectId,
+						moduleRef: null,
+						createdAt: Date.now(),
+						updatedAt: Date.now()
+					}], 
+					title: newTitle 
+				};
 			} else if (moduleType === 'flowchart') {
 				data.data = { flowchart: { nodes: [], edges: [] }, title: newTitle };
 			} else if (config.editorType === 'form') {
@@ -810,6 +824,15 @@
 					content: editingContentMd || editingContentHtml,
 					data: { ...editingEntry.data, versionId: compVersionId },
 					versionId: compVersionId
+				});
+			} else if (isMindmapView && editingEntry) {
+				const mindmapVersionId = editingVersionId || $currentVersion?.id || '';
+				await updateEntry(token, editingEntryId, {
+					title: editingDocTitle,
+					status: editingDocStatus,
+					content: editingContentMd || editingContentHtml,
+					data: { ...editingEntry.data, versionId: mindmapVersionId },
+					versionId: mindmapVersionId
 				});
 			} else {
 				const richVersionId = editingVersionId || $currentVersion?.id || '';

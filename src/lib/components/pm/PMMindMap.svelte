@@ -62,9 +62,9 @@
 				projectId,
 				parentId: null,
 				label: '产品',
-				type: 'root',
+				type: 'root' as const,
 				position: { x: 400, y: 50 },
-				metadata: { source: 'auto' },
+				metadata: { source: 'auto' as const },
 				moduleRef: null,
 				createdAt: Date.now(),
 				updatedAt: Date.now()
@@ -78,7 +78,7 @@
 					projectId,
 					parentId: rootId,
 					label: mod.name,
-					type: 'branch',
+					type: 'branch' as const,
 					position: { x: yIdx * 280 + 100, y: 200 },
 					metadata: { source: mod.source },
 					moduleRef: null,
@@ -94,7 +94,7 @@
 						projectId,
 						parentId: modId,
 						label: feat.name,
-						type: 'leaf',
+						type: 'leaf' as const,
 						position: { x: yIdx * 280 + 100, y: 300 + fi * 80 },
 						metadata: { source: feat.source, paramCount: feat.paramCount },
 						moduleRef: null,
@@ -131,6 +131,23 @@
 
 			return nodes;
 		}
+		
+		// If initialNodes is empty, create a default root node
+		if (initialNodes.length === 0) {
+			return [{
+				id: 'root-default',
+				projectId,
+				parentId: null,
+				label: '产品架构',
+				type: 'root' as const,
+				position: { x: 400, y: 50 },
+				metadata: { source: 'manual' as const },
+				moduleRef: null,
+				createdAt: Date.now(),
+				updatedAt: Date.now()
+			}];
+		}
+		
 		return initialNodes;
 	});
 
@@ -152,7 +169,7 @@
 		if (!selectedVersionId) return effectiveNodes;
 		return effectiveNodes.filter((node) => {
 			const meta = node.metadata || {};
-			const nodeVersionId = meta.versionId as string | undefined;
+			const nodeVersionId = (meta as Record<string, unknown>).versionId as string | undefined;
 			return !nodeVersionId || nodeVersionId === selectedVersionId;
 		});
 	});
@@ -346,10 +363,26 @@
 	}
 
 	let selectedNodeId: string | null = $state(null);
+	let showNodeDetail = $state(false);
+
+	let selectedNodeData = $derived.by(() => {
+		if (!selectedNodeId) return null;
+		const node = $allNodes.find((n) => n.id === selectedNodeId);
+		if (!node) return null;
+		return {
+			id: node.id,
+			label: node.data?.label as string,
+			type: node.data?.type as string,
+			metadata: node.data?.metadata as Record<string, unknown>,
+			moduleRef: node.data?.moduleRef as string | undefined,
+			position: node.position
+		};
+	});
 
 	function handleNodeClick(event: CustomEvent<{ node: Node }>) {
 		const node = event.detail.node;
 		selectedNodeId = node.id;
+		showNodeDetail = true;
 		const moduleRef = node.data?.moduleRef as string | undefined;
 		const moduleType = node.data?.metadata?.moduleType as string | undefined;
 		const nodeSource = node.data?.metadata?.source as string | undefined;
@@ -373,6 +406,11 @@
 		}
 	}
 
+	function closeNodeDetail() {
+		showNodeDetail = false;
+		selectedNodeId = null;
+	}
+
 	function handleNodeMouseOver(event: CustomEvent<{ node: Node }>) {
 		hoveredNodeId = event.detail.node.id;
 	}
@@ -383,6 +421,7 @@
 
 	function handlePaneClick() {
 		selectedNodeId = null;
+		showNodeDetail = false;
 	}
 
 	let fitViewOnLoad = $derived(isLargeGraph);
@@ -533,6 +572,79 @@
 				nodeColor={(node) => getNodeBorderColor(node.data?.type as string)}
 			/>
 		</SvelteFlow>
+
+		<!-- Node Detail Panel -->
+		{#if showNodeDetail && selectedNodeData}
+			{@const sd = selectedNodeData}
+			<div
+				class="absolute top-3 right-3 z-20 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-4 max-w-xs"
+			>
+				<div class="flex items-center justify-between mb-2">
+					<div class="font-medium text-sm text-gray-900 dark:text-white">{sd.label}</div>
+					<button
+						class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+						onclick={closeNodeDetail}
+					>
+						<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400 space-y-1.5">
+					<div class="flex items-center gap-2">
+						<span class="text-gray-400">类型:</span>
+						<span class="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+							{sd.type === 'root' ? '根节点' : sd.type === 'branch' ? '模块' : sd.type === 'leaf' ? '功能' : sd.type}
+						</span>
+					</div>
+					{#if sd.metadata?.source === 'auto'}
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">来源:</span>
+							<span class="text-green-600">自动聚合</span>
+						</div>
+					{:else if sd.metadata?.source === 'manual'}
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">来源:</span>
+							<span class="text-orange-500">手动添加</span>
+						</div>
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">状态:</span>
+							<span class="text-orange-500">规划中</span>
+						</div>
+					{/if}
+					{#if sd.metadata?.status && sd.metadata?.source !== 'manual'}
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">状态:</span>
+							<span>{sd.metadata.status}</span>
+						</div>
+					{/if}
+					{#if sd.metadata?.priority}
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">优先级:</span>
+							<span>{sd.metadata.priority}</span>
+						</div>
+					{/if}
+					{#if sd.metadata?.versionId}
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">版本:</span>
+							<span class="text-blue-600">{sd.metadata.versionId}</span>
+						</div>
+					{/if}
+					{#if sd.metadata?.paramCount}
+						<div class="flex items-center gap-2">
+							<span class="text-gray-400">参数数:</span>
+							<span>{sd.metadata.paramCount}</span>
+						</div>
+					{/if}
+					{#if sd.moduleRef}
+						<div class="text-blue-500">可导航至条目</div>
+					{/if}
+					<div class="border-t border-gray-100 dark:border-gray-700 pt-1.5 mt-1">
+						<div class="text-[10px] text-gray-400">ID: {sd.id}</div>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Tooltip -->
 		{#if hoveredNodeData}

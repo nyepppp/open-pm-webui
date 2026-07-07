@@ -1,7 +1,7 @@
 {
-  "id": "bug-flowchart-edit",
-  "name": "bug-flowchart-edit",
-  "title": "Bug: 流程图点击不能编辑",
+  "id": "refactor-architecture-flowchart",
+  "name": "refactor-architecture-flowchart",
+  "title": "重构产品架构页面与修复流程图模块",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
@@ -10,7 +10,7 @@
   "priority": "P2",
   "creator": "nye",
   "assignee": "nye",
-  "createdAt": "2026-07-05",
+  "createdAt": "2026-07-07",
   "completedAt": null,
   "branch": null,
   "base_branch": "main",
@@ -19,7 +19,7 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "07-05-issue-19-vibe-annotations",
+  "parent": null,
   "relatedFiles": [],
   "notes": "",
   "meta": {}
