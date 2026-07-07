@@ -6,6 +6,43 @@ import type { ModuleEntry, MindMapNode, Parameter } from '$lib/apis/pm/types';
 // Types
 // ============================================================================
 
+export interface ArchModule {
+	id: string;
+	name: string;
+	description?: string;
+	features: ArchFeature[];
+	versionId?: string;
+	order: number;
+	expanded?: boolean;
+}
+
+export interface ArchFeature {
+	id: string;
+	moduleId: string;
+	name: string;
+	description?: string;
+	parameters: ArchParameter[];
+	versionId?: string;
+	order: number;
+	expanded?: boolean;
+}
+
+export interface ArchParameter {
+	id: string;
+	featureId: string;
+	name: string;
+	key: string;
+	type: 'input' | 'output' | 'config';
+	dataType: 'string' | 'number' | 'boolean' | 'object' | 'array';
+	defaultValue?: string;
+	required: boolean;
+	description?: string;
+	versionId?: string;
+	sourceDocument?: string;
+	relatedRequirements?: string[];
+	order: number;
+}
+
 export interface TreeModule {
 	name: string;
 	source: 'auto' | 'manual';
@@ -30,6 +67,7 @@ export const parameterEntries: Writable<ModuleEntry[]> = writable([]);
 export const archEntries: Writable<ModuleEntry[]> = writable([]);
 export const isLoading: Writable<boolean> = writable(false);
 export const loadError: Writable<string> = writable('');
+export const architectureModules: Writable<ArchModule[]> = writable([]);
 
 // ============================================================================
 // In-memory cache
@@ -43,10 +81,6 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 
 // ============================================================================
-// Aggregation logic (matches +page.svelte lines 116-174)
-// ============================================================================
-
-// ============================================================================
 // Memoization cache for aggregation
 // ============================================================================
 
@@ -58,7 +92,6 @@ function aggregateModuleFeatureTree(
 	paramEntries: ModuleEntry[],
 	architectureEntries: ModuleEntry[]
 ): TreeModule[] {
-	// Check cache using JSON comparison
 	const paramJson = JSON.stringify(paramEntries.map(e => e.id));
 	const archJson = JSON.stringify(architectureEntries.map(e => e.id));
 	
@@ -66,7 +99,6 @@ function aggregateModuleFeatureTree(
 		return cachedTree;
 	}
 
-	// 1. Auto modules from parameter entries
 	const autoModules = new Map<string, Set<string>>();
 	for (const entry of paramEntries) {
 		const d = entry.data || {};
@@ -78,7 +110,6 @@ function aggregateModuleFeatureTree(
 		}
 	}
 
-	// 2. Manual modules/features from product-architecture entries
 	const manualModules = new Map<string, Set<string>>();
 	for (const entry of architectureEntries) {
 		const d = entry.data || {};
@@ -99,14 +130,12 @@ function aggregateModuleFeatureTree(
 		}
 	}
 
-	// 3. Merge: auto primary, manual supplements
 	const allModules = new Map(autoModules);
 	for (const [mod, feats] of manualModules) {
 		if (!allModules.has(mod)) allModules.set(mod, new Set());
 		for (const f of feats) allModules.get(mod)!.add(f);
 	}
 
-	// 4. Build TreeModule[]
 	cachedTree = [...allModules.entries()]
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([name, features]) => ({
@@ -124,6 +153,53 @@ function aggregateModuleFeatureTree(
 	lastParamEntriesJson = paramJson;
 	lastArchEntriesJson = archJson;
 	return cachedTree;
+}
+
+function convertToArchModules(treeModules: TreeModule[], paramEntries: ModuleEntry[]): ArchModule[] {
+	return treeModules.map((mod, modIndex) => {
+		const moduleId = `mod-${modIndex}`;
+		return {
+			id: moduleId,
+			name: mod.name,
+			description: '',
+			features: mod.features.map((feat, featIndex) => {
+				const featureId = `feat-${modIndex}-${featIndex}`;
+				const featureParams = paramEntries.filter(
+					e => e.data?.moduleName === mod.name && e.data?.featureName === feat.name
+				);
+				return {
+					id: featureId,
+					moduleId,
+					name: feat.name,
+					description: '',
+					parameters: featureParams.map((paramEntry, paramIndex) => {
+						const pData = paramEntry.data || {};
+						return {
+							id: paramEntry.id || `param-${modIndex}-${featIndex}-${paramIndex}`,
+							featureId,
+							name: String(paramEntry.title || pData.key || ''),
+							key: String(pData.key || ''),
+							type: (pData.paramType as 'input' | 'output' | 'config') || 'config',
+							dataType: (pData.dataType as 'string' | 'number' | 'boolean' | 'object' | 'array') || 'string',
+							defaultValue: String(pData.defaultValue || ''),
+							required: pData.required === 1,
+							description: String(pData.description || ''),
+							versionId: paramEntry.versionId,
+							sourceDocument: String(pData.sourceDocument || ''),
+							relatedRequirements: Array.isArray(pData.relatedRequirements) ? pData.relatedRequirements : [],
+							order: paramIndex
+						};
+					}),
+					versionId: paramEntries[0]?.versionId,
+					order: featIndex,
+					expanded: false
+				};
+			}),
+			versionId: mod.versionId,
+			order: modIndex,
+			expanded: false
+		};
+	});
 }
 
 // ============================================================================
@@ -148,6 +224,11 @@ export const editingEntryId: Readable<string | null> = derived(
 	$archEntries => $archEntries[0]?.id || null
 );
 
+export const architectureHierarchy: Readable<ArchModule[]> = derived(
+	[aggregatedTree, parameterEntries],
+	([$aggregatedTree, $parameterEntries]) => convertToArchModules($aggregatedTree, $parameterEntries)
+);
+
 // ============================================================================
 // Actions
 // ============================================================================
@@ -157,7 +238,6 @@ export async function loadData(projectId: string): Promise<void> {
 	loadError.set('');
 
 	try {
-		// Check cache first
 		const cached = cache.get(projectId);
 		if (cached) {
 			parameterEntries.set(cached.parameterEntries);
@@ -199,7 +279,6 @@ export async function loadData(projectId: string): Promise<void> {
 			loadError.set('加载数据失败，请稍后重试');
 		}
 
-		// Update cache on successful load (even if partial)
 		cache.set(projectId, {
 			parameterEntries: loadedParamEntries,
 			archEntries: loadedArchEntries
@@ -221,6 +300,7 @@ export async function retryLoadData(projectId: string): Promise<void> {
 export function resetArchitectureStore(): void {
 	parameterEntries.set([]);
 	archEntries.set([]);
+	architectureModules.set([]);
 	isLoading.set(false);
 	loadError.set('');
 	cache.clear();

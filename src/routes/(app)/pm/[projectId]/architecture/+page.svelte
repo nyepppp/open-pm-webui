@@ -3,106 +3,117 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
-		parameterEntries, archEntries, isLoading, loadError,
-		aggregatedTree, mindmapNodes, editingEntryId,
+		isLoading, loadError,
+		architectureHierarchy,
 		loadData, retryLoadData
 	} from '$lib/stores/pm/architectureStore';
-	import {
-		saveArchitectureEntry, addManualModule, addManualFeature,
-		deleteManualModule, deleteManualFeature
-	} from '$lib/services/architectureService';
-	import ArchitectureTabBar from '$lib/components/pm/architecture/ArchitectureTabBar.svelte';
-	import ArchitectureLoading from '$lib/components/pm/architecture/ArchitectureLoading.svelte';
-	import ArchitectureError from '$lib/components/pm/architecture/ArchitectureError.svelte';
-	import ModuleFeatureTree from '$lib/components/pm/ModuleFeatureTree.svelte';
-	import ModuleFeatureManager from '$lib/components/pm/architecture/ModuleFeatureManager.svelte';
-	import ParameterTable from '$lib/components/pm/ParameterTable.svelte';
-	import MindMapCanvas from '$lib/components/pm/mindmap/MindMapCanvas.svelte';
+	import type { ArchModule } from '$lib/stores/pm/architectureStore';
+	import MindMapView from '$lib/components/pm/architecture/MindMapView.svelte';
+	import ArchitectureTable from '$lib/components/pm/architecture/ArchitectureTable.svelte';
 	import PMVersionSelector from '$lib/components/pm/PMVersionSelector.svelte';
-	import { treeToMindMap } from '$lib/utils/excalidrawDataConverter';
-	import type { MindMapNode } from '$lib/apis/pm/types';
+	import { createEntry, updateEntry, deleteEntry } from '$lib/apis/pm/index';
 
 	let projectId = $derived($page.params.projectId!);
-	let selectedModule = $state<string | null>(null);
-	let selectedFeature = $state<string | null>(null);
-	let treeCollapsed = $state(false);
 	let showVersionSelector = $state(false);
 	let selectedVersion = $state<{ id: string; versionNumber: string; label?: string } | null>(null);
-	let activeTab = $state<'mindmap' | 'modules' | 'params'>('mindmap');
+	let activeTab = $state<'mindmap' | 'table'>('mindmap');
+	let modules = $state<ArchModule[]>([]);
+	let tableRef = $state<any>(null);
 
-	// Responsive: collapse tree on small screens
+	// Subscribe to architecture hierarchy
 	$effect(() => {
-		let resizeTimer: ReturnType<typeof setTimeout>;
-		function onResize() {
-			clearTimeout(resizeTimer);
-			resizeTimer = setTimeout(() => {
-				if (window.innerWidth < 768 && !treeCollapsed) treeCollapsed = true;
-			}, 200);
-		}
-		onResize();
-		window.addEventListener('resize', onResize);
-		return () => {
-			clearTimeout(resizeTimer);
-			window.removeEventListener('resize', onResize);
-		};
+		const unsubscribe = architectureHierarchy.subscribe(data => {
+			modules = data;
+		});
+		return unsubscribe;
 	});
 
 	onMount(() => { loadData(projectId); });
 
-	async function handleAddModule(name: string) {
-		try {
-			const token = localStorage.token || '';
-			const updatedNodes = await addManualModule(token, projectId, name, $mindmapNodes, $editingEntryId);
-			await saveArchitectureEntry(token, projectId, $editingEntryId, updatedNodes, $archEntries[0]?.data);
-			await loadData(projectId);
-			toast.success(`模块 "${name}" 已添加`);
-		} catch (e: any) { toast.error(e.message || '添加模块失败'); }
-	}
-
-	async function handleAddFeature(moduleName: string, featureName: string) {
-		try {
-			const token = localStorage.token || '';
-			const updatedNodes = await addManualFeature(token, projectId, moduleName, featureName, $mindmapNodes, $editingEntryId);
-			await saveArchitectureEntry(token, projectId, $editingEntryId, updatedNodes, $archEntries[0]?.data);
-			await loadData(projectId);
-			toast.success(`功能 "${featureName}" 已添加到 "${moduleName}"`);
-		} catch (e: any) { toast.error(e.message || '添加功能失败'); }
-	}
-
-	async function handleDeleteModule(name: string) {
-		try {
-			const token = localStorage.token || '';
-			const updatedNodes = await deleteManualModule(token, projectId, name, $mindmapNodes, $editingEntryId);
-			await saveArchitectureEntry(token, projectId, $editingEntryId, updatedNodes, $archEntries[0]?.data);
-			await loadData(projectId);
-			if (selectedModule === name) { selectedModule = null; selectedFeature = null; }
-			toast.success(`模块 "${name}" 已删除`);
-		} catch (e: any) { toast.error(e.message || '删除模块失败'); }
-	}
-
-	async function handleDeleteFeature(moduleName: string, featureName: string) {
-		try {
-			const token = localStorage.token || '';
-			const updatedNodes = await deleteManualFeature(token, projectId, moduleName, featureName, $mindmapNodes, $editingEntryId);
-			await saveArchitectureEntry(token, projectId, $editingEntryId, updatedNodes, $archEntries[0]?.data);
-			await loadData(projectId);
-			if (selectedFeature === featureName) selectedFeature = null;
-			toast.success(`功能 "${featureName}" 已删除`);
-		} catch (e: any) { toast.error(e.message || '删除功能失败'); }
-	}
-
-	function handleTreeSelect(module: string, feature?: string) {
-		selectedModule = module;
-		selectedFeature = feature || null;
-	}
-
-	async function handleParamDataChange() { await loadData(projectId); }
-
 	function handleVersionSelect(version: { id: string; versionNumber: string; label?: string }) {
 		selectedVersion = version;
 		showVersionSelector = false;
-		// TODO: Reload data with version filter
+		// Reload data with version
+		loadData(projectId);
 		toast.success(`已切换到版本 ${version.versionNumber}`);
+	}
+
+	function handleNodeClick(moduleId: string, featureId?: string) {
+		activeTab = 'table';
+		// Scroll to and highlight the clicked node in table
+		const targetId = featureId || moduleId;
+		if (tableRef) {
+			tableRef.highlightItem(targetId);
+		}
+		toast.info(`定位到: ${moduleId}${featureId ? ' > ' + featureId : ''}`);
+	}
+
+	async function handleTableEdit(type: 'module' | 'feature' | 'parameter', data: any) {
+		try {
+			const token = localStorage.token || '';
+			if (!token) {
+				toast.error('未登录');
+				return;
+			}
+
+			// Update entry via API
+			await updateEntry(token, data.id, {
+				...data,
+				module_type: 'product-architecture'
+			});
+			
+			// Refresh data
+			await loadData(projectId);
+			toast.success('更新成功');
+		} catch (e: any) {
+			toast.error(e.message || '更新失败');
+		}
+	}
+
+	async function handleTableDelete(type: 'module' | 'feature' | 'parameter', id: string) {
+		try {
+			const token = localStorage.token || '';
+			if (!token) {
+				toast.error('未登录');
+				return;
+			}
+
+			await deleteEntry(token, id);
+			
+			// Refresh data
+			await loadData(projectId);
+			toast.success('删除成功');
+		} catch (e: any) {
+			toast.error(e.message || '删除失败');
+		}
+	}
+
+	async function handleTableAdd(type: 'module' | 'feature' | 'parameter', parentId?: string) {
+		try {
+			const token = localStorage.token || '';
+			if (!token) {
+				toast.error('未登录');
+				return;
+			}
+
+			// Create new entry via API
+			const newData = {
+				module_type: 'product-architecture',
+				title: type === 'module' ? '新模块' : type === 'feature' ? '新功能' : '新参数',
+				data: {
+					type: type,
+					parentId: parentId || null
+				}
+			};
+
+			await createEntry(token, projectId, newData);
+			
+			// Refresh data
+			await loadData(projectId);
+			toast.success('添加成功');
+		} catch (e: any) {
+			toast.error(e.message || '添加失败');
+		}
 	}
 </script>
 
@@ -138,140 +149,48 @@
 			</div>
 		</div>
 		<!-- Tab Bar -->
-		<ArchitectureTabBar {activeTab} onTabChange={(tab) => { activeTab = tab; }} />
+		<div class="flex gap-1 mt-2">
+			<button
+				class="px-4 py-2 rounded-xl text-sm font-medium transition {activeTab === 'mindmap' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}"
+				onclick={() => activeTab = 'mindmap'}
+			>
+				思维导图
+			</button>
+			<button
+				class="px-4 py-2 rounded-xl text-sm font-medium transition {activeTab === 'table' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}"
+				onclick={() => activeTab = 'table'}
+			>
+				表格
+			</button>
+		</div>
 	</div>
 
 	<!-- Content -->
 	{#if $isLoading}
-		<ArchitectureLoading />
+		<div class="flex items-center justify-center h-[calc(100vh-200px)]">
+			<div class="w-8 h-8 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin"></div>
+		</div>
 	{:else if $loadError}
-		<ArchitectureError error={$loadError} onRetry={() => retryLoadData(projectId)} />
+		<div class="flex flex-col items-center justify-center h-[calc(100vh-200px)]">
+			<div class="text-red-500 mb-2">{$loadError}</div>
+			<button class="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition" onclick={() => retryLoadData(projectId)}>
+				重试
+			</button>
+		</div>
 	{:else}
-		<!-- Tab 1: Mind Map -->
 		{#if activeTab === 'mindmap'}
 			<div class="h-[calc(100vh-200px)]">
-				<div class="h-full relative">
-					<MindMapCanvas
-						data={treeToMindMap($aggregatedTree)}
-						version={selectedVersion?.versionNumber}
-						onNodeClick={(node) => {
-							if (node.type === 'module') {
-								selectedModule = node.name;
-								selectedFeature = null;
-							} else if (node.type === 'feature') {
-								// Find parent module
-								const parentModule = $aggregatedTree.find(m => 
-									m.features.some(f => f.name === node.name)
-								);
-								if (parentModule) {
-									selectedModule = parentModule.name;
-									selectedFeature = node.name;
-								}
-							}
-						}}
-					/>
-				</div>
+				<MindMapView modules={modules} onNodeClick={handleNodeClick} />
 			</div>
-		{/if}
-
-		<!-- Tab 2: Module/Feature Management -->
-		{#if activeTab === 'modules'}
+		{:else}
 			<div class="h-[calc(100vh-200px)]">
-				<div class="flex gap-3 h-full">
-					<!-- Left: Module-Feature Tree -->
-					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
-						<div class="flex items-center justify-between mb-2">
-							{#if !treeCollapsed}
-								<span class="text-sm font-medium text-gray-700 dark:text-gray-300">模块结构</span>
-							{/if}
-							<button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors" onclick={() => { treeCollapsed = !treeCollapsed; }} title={treeCollapsed ? '展开导航' : '收起导航'}>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									{#if treeCollapsed}
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-									{:else}
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-									{/if}
-								</svg>
-							</button>
-						</div>
-						<ModuleFeatureTree
-							modules={$aggregatedTree}
-							{selectedModule}
-							{selectedFeature}
-							onSelect={handleTreeSelect}
-							onAddModule={handleAddModule}
-							onAddFeature={handleAddFeature}
-							onDeleteModule={handleDeleteModule}
-							onDeleteFeature={handleDeleteFeature}
-							collapsed={treeCollapsed}
-							versionInfo={selectedVersion}
-						/>
-					</div>
-					<!-- Right: Module/Feature Description -->
-					<div class="flex-1 min-w-0 overflow-hidden">
-						<ModuleFeatureManager
-							modules={$aggregatedTree}
-							{projectId}
-							{selectedModule}
-							{selectedFeature}
-							archEntries={$archEntries}
-							onSelect={handleTreeSelect}
-							onAddModule={handleAddModule}
-							onAddFeature={handleAddFeature}
-							onDeleteModule={handleDeleteModule}
-							onDeleteFeature={handleDeleteFeature}
-							onDataChange={handleParamDataChange}
-						/>
-					</div>
-				</div>
-			</div>
-		{/if}
-
-		<!-- Tab 3: Parameter Table -->
-		{#if activeTab === 'params'}
-			<div class="h-[calc(100vh-200px)]">
-				<div class="flex gap-3 h-full">
-					<!-- Left: Module-Feature Tree -->
-					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
-						<div class="flex items-center justify-between mb-2">
-							{#if !treeCollapsed}
-								<span class="text-sm font-medium text-gray-700 dark:text-gray-300">模块结构</span>
-							{/if}
-							<button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors" onclick={() => { treeCollapsed = !treeCollapsed; }} title={treeCollapsed ? '展开导航' : '收起导航'}>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									{#if treeCollapsed}
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-									{:else}
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-									{/if}
-								</svg>
-							</button>
-						</div>
-						<ModuleFeatureTree
-							modules={$aggregatedTree}
-							{selectedModule}
-							{selectedFeature}
-							onSelect={handleTreeSelect}
-							onAddModule={handleAddModule}
-							onAddFeature={handleAddFeature}
-							onDeleteModule={handleDeleteModule}
-							onDeleteFeature={handleDeleteFeature}
-							collapsed={treeCollapsed}
-							versionInfo={selectedVersion}
-						/>
-					</div>
-					<!-- Right: Parameter Table -->
-					<div class="flex-1 min-w-0 overflow-hidden">
-						<ParameterTable
-							entries={$parameterEntries}
-							{projectId}
-							filterModule={selectedModule}
-							filterFeature={selectedFeature}
-							onDataChange={handleParamDataChange}
-							versionId={selectedVersion?.id || null}
-						/>
-					</div>
-				</div>
+				<ArchitectureTable 
+					modules={modules} 
+					onEdit={handleTableEdit}
+					onDelete={handleTableDelete}
+					onAdd={handleTableAdd}
+					bind:this={tableRef}
+				/>
 			</div>
 		{/if}
 	{/if}

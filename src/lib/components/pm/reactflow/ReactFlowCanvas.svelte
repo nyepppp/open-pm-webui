@@ -26,6 +26,7 @@
 	let selectedNodeId = $state<string | null>(null);
 	let isDragging = $state(false);
 	let dragOffset = $state({ x: 0, y: 0 });
+	let svgElement = $state<SVGSVGElement | null>(null);
 
 	$effect(() => {
 		localNodes = nodes ? [...nodes] : [];
@@ -35,10 +36,19 @@
 		localEdges = edges ? [...edges] : [];
 	});
 
-	function getNodeShape(node: any) {
+	function getNodeDimensions(node: any) {
 		const shape = node.data?.shape || 'rectangle';
-		const width = node.style?.width ? parseInt(node.style.width) : 140;
-		const height = node.style?.height ? parseInt(node.style.height) : 60;
+		const defaultWidth = shape === 'diamond' ? 100 : 140;
+		const defaultHeight = shape === 'diamond' ? 100 : 60;
+		return {
+			width: node.style?.width ? parseInt(node.style.width) : defaultWidth,
+			height: node.style?.height ? parseInt(node.style.height) : defaultHeight
+		};
+	}
+
+	function getNodeShape(node: any) {
+		const { width, height } = getNodeDimensions(node);
+		const shape = node.data?.shape || 'rectangle';
 		
 		switch (shape) {
 			case 'circle':
@@ -59,15 +69,13 @@
 		const targetNode = localNodes.find(n => n.id === edge.target);
 		if (!sourceNode || !targetNode) return '';
 
-		const sourceWidth = sourceNode.style?.width ? parseInt(sourceNode.style.width) : 140;
-		const sourceHeight = sourceNode.style?.height ? parseInt(sourceNode.style.height) : 60;
-		const targetWidth = targetNode.style?.width ? parseInt(targetNode.style.width) : 140;
-		const targetHeight = targetNode.style?.height ? parseInt(targetNode.style.height) : 60;
+		const sourceDim = getNodeDimensions(sourceNode);
+		const targetDim = getNodeDimensions(targetNode);
 
-		const sx = sourceNode.position.x + sourceWidth / 2;
-		const sy = sourceNode.position.y + sourceHeight / 2;
-		const tx = targetNode.position.x + targetWidth / 2;
-		const ty = targetNode.position.y + targetHeight / 2;
+		const sx = sourceNode.position.x + sourceDim.width / 2;
+		const sy = sourceNode.position.y + sourceDim.height / 2;
+		const tx = targetNode.position.x + targetDim.width / 2;
+		const ty = targetNode.position.y + targetDim.height / 2;
 
 		// Simple straight line for now, can be enhanced with bezier curves
 		return `M ${sx} ${sy} L ${tx} ${ty}`;
@@ -90,7 +98,9 @@
 		if (readonly) return;
 		event.stopPropagation();
 		isDragging = true;
-		const rect = (event.target as Element).closest('svg')?.getBoundingClientRect();
+		selectedNodeId = node.id;
+		
+		const rect = svgElement?.getBoundingClientRect();
 		if (rect) {
 			dragOffset.x = event.clientX - rect.left - node.position.x;
 			dragOffset.y = event.clientY - rect.top - node.position.y;
@@ -100,9 +110,9 @@
 	function handleMouseMove(event: MouseEvent) {
 		if (!isDragging || readonly || !selectedNodeId) return;
 		
-		const svg = (event.target as Element).closest('svg');
-		if (!svg) return;
-		const rect = svg.getBoundingClientRect();
+		const rect = svgElement?.getBoundingClientRect();
+		if (!rect) return;
+		
 		const x = event.clientX - rect.left - dragOffset.x;
 		const y = event.clientY - rect.top - dragOffset.y;
 		
@@ -118,14 +128,21 @@
 	function handleMouseUp() {
 		isDragging = false;
 	}
+
+	function handleMouseLeave() {
+		isDragging = false;
+	}
 </script>
 
 <div class="w-full h-full" style="min-height: 400px;" onclick={handlePaneClick} role="presentation">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<svg 
 		class="w-full h-full" 
 		style="min-height: 400px; cursor: default;"
+		bind:this={svgElement}
 		onmousemove={handleMouseMove}
 		onmouseup={handleMouseUp}
+		onmouseleave={handleMouseLeave}
 	>
 		<defs>
 			<pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
@@ -153,12 +170,15 @@
 		{#each localNodes as node}
 			{@const isSelected = selectedNodeId === node.id}
 			{@const shapePath = getNodeShape(node)}
-			{@const width = node.style?.width ? parseInt(node.style.width) : 140}
-			{@const height = node.style?.height ? parseInt(node.style.height) : 60}
+			{@const { width, height } = getNodeDimensions(node)}
 			<g 
 				class="cursor-pointer"
 				onclick={(e) => handleNodeClick(e, node)}
 				onmousedown={(e) => handleNodeMouseDown(e, node)}
+				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleNodeClick(e as any, node); }}
+				role="button"
+				tabindex="0"
+				aria-label={node.data?.label || 'Flowchart node'}
 			>
 				<path 
 					d={shapePath}
