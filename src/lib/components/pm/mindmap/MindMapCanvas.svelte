@@ -35,6 +35,7 @@
 	let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown>;
 	let initialized = false;
 	let ro: ResizeObserver;
+	let resizeTimer: ReturnType<typeof setTimeout>;
 
 	// Interaction state
 	let selectedNodeId: string | null = $state(null);
@@ -44,9 +45,12 @@
 	let tooltipContent: TooltipContent | null = $state(null);
 
 	// Container dimensions (react to resize)
-	let containerWidth = $state(width);
-	let containerHeight = $state(height);
+	let containerWidth = $state(width || 1200);
+	let containerHeight = $state(height || 800);
 	let isDark = $state(false);
+
+	// Memoize data to avoid unnecessary re-renders
+	let lastDataJson = '';
 
 	const nodeWidth = 140;
 	const nodeHeight = 60;
@@ -261,6 +265,7 @@
 
 		// Update text
 		nodeMerge.select('text')
+			.attr('fill', isDark ? '#e5e7eb' : '#1f2937')
 			.text(d => truncateText(d.data.name, nodeWidth - 20));
 
 		// Update source dot
@@ -358,8 +363,11 @@
 			const w = entry.contentRect.width;
 			const h = entry.contentRect.height;
 			if (w > 0 && h > 0 && (w !== containerWidth || h !== containerHeight)) {
-				containerWidth = w;
-				containerHeight = h;
+				clearTimeout(resizeTimer);
+				resizeTimer = setTimeout(() => {
+					containerWidth = w;
+					containerHeight = h;
+				}, 300);
 			}
 		});
 		ro.observe(container);
@@ -372,6 +380,10 @@
 			const _w = containerWidth;
 			const _h = containerHeight;
 			void (_w + _h);
+			// Debounce data updates to avoid excessive re-renders
+			const dataJson = JSON.stringify(data);
+			if (dataJson === lastDataJson) return;
+			lastDataJson = dataJson;
 			svg?.attr('viewBox', [0, 0, containerWidth, containerHeight]);
 			update();
 		}

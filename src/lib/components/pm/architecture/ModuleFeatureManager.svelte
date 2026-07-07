@@ -93,9 +93,10 @@
 
 	function handleAddModule() {
 		if (!newModuleName.trim()) return;
-		onAddModule(newModuleName.trim());
+		const name = newModuleName.trim();
 		newModuleName = '';
 		showAddModuleForm = false;
+		onAddModule(name);
 	}
 
 	function handleAddFeature() {

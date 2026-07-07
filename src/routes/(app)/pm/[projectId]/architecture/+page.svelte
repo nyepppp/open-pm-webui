@@ -148,8 +148,8 @@
 		<ArchitectureError error={$loadError} onRetry={() => retryLoadData(projectId)} />
 	{:else}
 		<!-- Tab 1: Mind Map -->
-		<div class="h-[calc(100vh-200px)]" class:hidden={activeTab !== 'mindmap'}>
-			{#if activeTab === 'mindmap'}
+		{#if activeTab === 'mindmap'}
+			<div class="h-[calc(100vh-200px)]">
 				<div class="h-full relative">
 					<MindMapCanvas
 						data={treeToMindMap($aggregatedTree)}
@@ -171,12 +171,12 @@
 						}}
 					/>
 				</div>
-			{/if}
-		</div>
+			</div>
+		{/if}
 
 		<!-- Tab 2: Module/Feature Management -->
-		<div class="h-[calc(100vh-200px)]" class:hidden={activeTab !== 'modules'}>
-			{#if activeTab === 'modules'}
+		{#if activeTab === 'modules'}
+			<div class="h-[calc(100vh-200px)]">
 				<div class="flex gap-3 h-full">
 					<!-- Left: Module-Feature Tree -->
 					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
@@ -224,12 +224,12 @@
 						/>
 					</div>
 				</div>
-			{/if}
-		</div>
+			</div>
+		{/if}
 
 		<!-- Tab 3: Parameter Table -->
-		<div class="h-[calc(100vh-200px)]" class:hidden={activeTab !== 'params'}>
-			{#if activeTab === 'params'}
+		{#if activeTab === 'params'}
+			<div class="h-[calc(100vh-200px)]">
 				<div class="flex gap-3 h-full">
 					<!-- Left: Module-Feature Tree -->
 					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
@@ -272,8 +272,8 @@
 						/>
 					</div>
 				</div>
-			{/if}
-		</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 
