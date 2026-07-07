@@ -535,3 +535,36 @@ Implemented unified /pm/architecture page with tab switching between mindmap and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 架构页面性能优化与交互修复
+
+**Date**: 2026-07-07
+**Task**: 架构页面性能优化与交互修复
+**Branch**: `main`
+
+### Summary
+
+修复架构页面3个遗留问题：卡片点击卡顿、添加功能按钮无响应、Tab切换卡顿。使用class:hidden替代条件渲染避免组件销毁/重建，添加will-change优化动画性能，修复弹窗条件渲染问题。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c489b1a6c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
