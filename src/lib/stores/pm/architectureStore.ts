@@ -46,10 +46,26 @@ const cache = new Map<string, CacheEntry>();
 // Aggregation logic (matches +page.svelte lines 116-174)
 // ============================================================================
 
+// ============================================================================
+// Memoization cache for aggregation
+// ============================================================================
+
+let lastParamEntriesJson = '';
+let lastArchEntriesJson = '';
+let cachedTree: TreeModule[] = [];
+
 function aggregateModuleFeatureTree(
 	paramEntries: ModuleEntry[],
 	architectureEntries: ModuleEntry[]
 ): TreeModule[] {
+	// Check cache using JSON comparison
+	const paramJson = JSON.stringify(paramEntries.map(e => e.id));
+	const archJson = JSON.stringify(architectureEntries.map(e => e.id));
+	
+	if (paramJson === lastParamEntriesJson && archJson === lastArchEntriesJson && cachedTree.length > 0) {
+		return cachedTree;
+	}
+
 	// 1. Auto modules from parameter entries
 	const autoModules = new Map<string, Set<string>>();
 	for (const entry of paramEntries) {
@@ -91,7 +107,7 @@ function aggregateModuleFeatureTree(
 	}
 
 	// 4. Build TreeModule[]
-	return [...allModules.entries()]
+	cachedTree = [...allModules.entries()]
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([name, features]) => ({
 			name,
@@ -104,6 +120,10 @@ function aggregateModuleFeatureTree(
 				).length
 			}))
 		}));
+	
+	lastParamEntriesJson = paramJson;
+	lastArchEntriesJson = archJson;
+	return cachedTree;
 }
 
 // ============================================================================

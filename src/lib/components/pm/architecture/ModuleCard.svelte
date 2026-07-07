@@ -34,13 +34,18 @@
 		class="relative bg-white dark:bg-gray-800 rounded-xl border-2 cursor-pointer overflow-hidden will-change-transform {selected 
 			? 'border-blue-500 shadow-lg shadow-blue-100 dark:shadow-blue-900/20' 
 			: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-md'}"
-		onclick={() => onSelect?.()}
+		onclick={(e) => {
+			// Only trigger if clicking the card itself, not child buttons
+			if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.card-content')) {
+				onSelect?.();
+			}
+		}}
 		role="button"
 		tabindex="0"
 		onkeydown={(e) => e.key === 'Enter' && onSelect?.()}
 	>
 		<!-- Source Badge -->
-		<div class="absolute top-3 right-3">
+		<div class="absolute top-3 right-3 pointer-events-none">
 			{#if module.source === 'manual'}
 				<span class="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
 					规划中
@@ -53,7 +58,7 @@
 		</div>
 
 		<!-- Card Content -->
-		<div class="p-4">
+		<div class="p-4 card-content">
 			<!-- Header -->
 			<div class="flex items-center gap-3 mb-2">
 				<div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
@@ -168,7 +173,7 @@
 			<!-- Add Feature Button -->
 			<button
 				class="w-full py-2 rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 text-gray-400 hover:text-blue-600 hover:border-blue-300 dark:hover:border-blue-700 transition-all duration-200 text-sm"
-				onclick={() => onAddFeature?.()}
+				onclick={(e) => { e.stopPropagation(); onAddFeature?.(); }}
 			>
 				+ 添加功能
 			</button>
