@@ -31,7 +31,7 @@
 <div class="group relative">
 	<!-- Module Card -->
 	<div
-		class="relative bg-white dark:bg-gray-800 rounded-xl border-2 transition-all duration-200 cursor-pointer overflow-hidden {selected 
+		class="relative bg-white dark:bg-gray-800 rounded-xl border-2 cursor-pointer overflow-hidden will-change-transform {selected 
 			? 'border-blue-500 shadow-lg shadow-blue-100 dark:shadow-blue-900/20' 
 			: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-md'}"
 		onclick={() => onSelect?.()}

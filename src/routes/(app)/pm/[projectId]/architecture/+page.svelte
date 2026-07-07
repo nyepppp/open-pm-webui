@@ -148,33 +148,35 @@
 		<ArchitectureError error={$loadError} onRetry={() => retryLoadData(projectId)} />
 	{:else}
 		<!-- Tab 1: Mind Map -->
-		{#if activeTab === 'mindmap'}
-			<div class="h-[calc(100vh-200px)] relative">
-				<MindMapCanvas
-					data={treeToMindMap($aggregatedTree)}
-					version={selectedVersion?.versionNumber}
-					onNodeClick={(node) => {
-						if (node.type === 'module') {
-							selectedModule = node.name;
-							selectedFeature = null;
-						} else if (node.type === 'feature') {
-							// Find parent module
-							const parentModule = $aggregatedTree.find(m => 
-								m.features.some(f => f.name === node.name)
-							);
-							if (parentModule) {
-								selectedModule = parentModule.name;
-								selectedFeature = node.name;
+		<div class="h-[calc(100vh-200px)]" class:hidden={activeTab !== 'mindmap'}>
+			{#if activeTab === 'mindmap'}
+				<div class="h-full relative">
+					<MindMapCanvas
+						data={treeToMindMap($aggregatedTree)}
+						version={selectedVersion?.versionNumber}
+						onNodeClick={(node) => {
+							if (node.type === 'module') {
+								selectedModule = node.name;
+								selectedFeature = null;
+							} else if (node.type === 'feature') {
+								// Find parent module
+								const parentModule = $aggregatedTree.find(m => 
+									m.features.some(f => f.name === node.name)
+								);
+								if (parentModule) {
+									selectedModule = parentModule.name;
+									selectedFeature = node.name;
+								}
 							}
-						}
-					}}
-				/>
-			</div>
-		{/if}
+						}}
+					/>
+				</div>
+			{/if}
+		</div>
 
 		<!-- Tab 2: Module/Feature Management -->
-		{#if activeTab === 'modules'}
-			<div class="h-[calc(100vh-200px)]">
+		<div class="h-[calc(100vh-200px)]" class:hidden={activeTab !== 'modules'}>
+			{#if activeTab === 'modules'}
 				<div class="flex gap-3 h-full">
 					<!-- Left: Module-Feature Tree -->
 					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
@@ -222,12 +224,12 @@
 						/>
 					</div>
 				</div>
-			</div>
-		{/if}
+			{/if}
+		</div>
 
 		<!-- Tab 3: Parameter Table -->
-		{#if activeTab === 'params'}
-			<div class="h-[calc(100vh-200px)]">
+		<div class="h-[calc(100vh-200px)]" class:hidden={activeTab !== 'params'}>
+			{#if activeTab === 'params'}
 				<div class="flex gap-3 h-full">
 					<!-- Left: Module-Feature Tree -->
 					<div class="{treeCollapsed ? 'w-full' : 'w-72 shrink-0'} flex flex-col">
@@ -270,8 +272,8 @@
 						/>
 					</div>
 				</div>
-			</div>
-		{/if}
+			{/if}
+		</div>
 	{/if}
 </div>
 
