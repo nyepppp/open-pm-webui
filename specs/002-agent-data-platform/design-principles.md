@@ -79,5 +79,5 @@
 
 ## 5. 后续动作
 
-- 本文档评审通过后，将第 2 节「技能即通用模块」提升为宪法原则 VI 的修订项（走 24h 评审流程，记入 `.orgii/plans/`）。
+- 第 2 节「技能即通用模块」已提升为**宪法修订提案（PROPOSED）**：见 `docs/plans/2026-07-11-skill-generic-module-amendment.md`。走 24h 评审流程（宪法 §Amendment Procedure），ratify after **2026-07-12 14:02**；评审通过后应用至原则 VI，版本升至 1.2.0，并将「技能即通用模块」写为 HARD CONSTRAINT（写死）。（注：宪法原写 `.orgii/plans/`，本仓库无该目录，依实际结构置于 `docs/plans/`。）
 - 实施顺序见 `roadmap.md`；模块设计与接口见 `architecture.md`；可编码需求见 `spec.md` + `data-model.md`。
