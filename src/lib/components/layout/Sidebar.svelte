@@ -77,7 +77,7 @@
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'pm'];
+	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'pm', 'workflows'];
 
 	$: isPmRoute = $page.url.pathname.startsWith('/pm');
 
@@ -107,7 +107,14 @@
 
 	let newFolderId = null;
 
-	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
+	$: pinnedItems = (() => {
+		const items = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
+		// Ensure workflows is always included in pinned items
+		if (!items.includes('workflows')) {
+			return [...items, 'workflows'];
+		}
+		return items;
+	})();
 
 	const isMenuItemVisible = (id) => {
 		switch (id) {
@@ -135,12 +142,14 @@
 					$config?.features?.enable_calendar &&
 					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
 				);
-			case 'playground':
-				return $user?.role === 'admin';
-			case 'pm':
-				return true;
-			default:
-				return false;
+		case 'playground':
+			return $user?.role === 'admin';
+		case 'pm':
+			return true;
+		case 'workflows':
+			return true;
+		default:
+			return false;
 		}
 	};
 
@@ -151,7 +160,8 @@
 			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
 			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
 			playground: { label: 'Playground', href: '/playground', iconType: 'playground' },
-			pm: { label: 'PM 工作台', href: '/pm', iconType: 'pm' }
+			pm: { label: 'PM 工作台', href: '/pm', iconType: 'pm' },
+			workflows: { label: '工作流', href: '/workflows', iconType: 'workflow' }
 		};
 		return items[id];
 	};
@@ -930,18 +940,29 @@
 											</svg>
 										{:else if itemId === 'playground'}
 											<Code className="size-4.5" />
-										{:else if itemId === 'pm'}
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke-width="1.5"
-												stroke="currentColor"
-												class="size-4.5"
-											>
-												<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h4.5m-4.5 0H6.375a.375.375 0 0 1-.375-.375V6.375c0-.207.168-.375.375-.375h6.75c.207 0 .375.168.375.375v3.75m4.5 0h-4.5m4.5 0H18a.375.375 0 0 1 .375.375v6.75c0 .207-.168.375-.375.375h-4.5" />
-											</svg>
-										{/if}
+											{:else if itemId === 'pm'}
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="1.5"
+													stroke="currentColor"
+													class="size-4.5"
+												>
+													<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h4.5m-4.5 0H6.375a.375.375 0 0 1-.375-.375V6.375c0-.207.168-.375.375-.375h6.75c.207 0 .375.168.375.375v3.75m4.5 0h-4.5m4.5 0H18a.375.375 0 0 1 .375.375v6.75c0 .207-.168.375-.375.375h-4.5" />
+												</svg>
+											{:else if itemId === 'workflows'}
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="1.5"
+													stroke="currentColor"
+													class="size-4.5"
+												>
+													<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25a2.25 2.25 0 0 1-2.25 2.25h-2.25A2.25 2.25 0 0 1 13.5 8.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
+												</svg>
+											{/if}
 									</div>
 								</a>
 							</Tooltip>
@@ -1088,7 +1109,10 @@
 							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
 							href="/"
 							draggable="false"
-							on:click={newChatHandler}
+							on:click={async (e) => {
+								goto('/');
+								newChatHandler();
+							}}
 							aria-label={$i18n.t('New Chat')}
 						>
 							<div class="self-center">
@@ -1219,9 +1243,20 @@
 															d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
 														/>
 													</svg>
-												{:else if itemId === 'playground'}
-													<Code className="size-4.5" strokeWidth="2" />
-												{/if}
+											{:else if itemId === 'playground'}
+												<Code className="size-4.5" strokeWidth="2" />
+											{:else if itemId === 'workflows'}
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="2"
+													stroke="currentColor"
+													class="size-4.5"
+												>
+													<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25a2.25 2.25 0 0 1-2.25 2.25h-2.25A2.25 2.25 0 0 1 13.5 8.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
+												</svg>
+											{/if}
 											</div>
 
 											<div class="flex self-center translate-y-[0.5px]">

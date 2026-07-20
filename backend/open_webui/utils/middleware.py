@@ -154,6 +154,249 @@ def output_id(prefix: str) -> str:
     return f'{prefix}_{uuid4().hex[:24]}'
 
 
+# Bug 6 (v10): Doubao leaks FC tokens in MULTIPLE text formats.
+# v9 only handled <|FunctionCallBegin|>...<|FunctionCallEnd|> (JSON payload).
+# v10 extends to handle seed:tool_call<function>...</function> (XML-like payload)
+# AND proactively defends against other common FC text variants (D95).
+#
+# Each entry: (begin_marker, end_marker, parser_name)
+_TEXT_FC_PARSERS = [
+    # Pattern A (v9): Doubao native JSON
+    ('<|FunctionCallBegin|>', '<|FunctionCallEnd|>', '_parse_json_fc_payload'),
+    # Pattern B (v10 NEW): Doubao seed XML-like — seen in 08:54 user log
+    ('seed:tool_call', '</seed:tool_call>', '_parse_seed_fc_payload'),
+    # Pattern C-G (v10 proactive): common FC text variants
+    ('<tool_call>', '</tool_call>', '_parse_json_fc_payload'),
+    ('<function_call>', '</function_call>', '_parse_json_fc_payload'),
+    ('<|tool_calls_begin|>', '<|tool_calls_end|>', '_parse_json_fc_payload'),
+    ('<|tool_call_start|>', '<|tool_call_end|>', '_parse_json_fc_payload'),
+    # Pattern H (v12 NEW): Claude/GLM <function_calls><invoke> format
+    ('<function_calls>', '</function_calls>', '_parse_invoke_fc_payload'),
+    # Pattern I (v12 NEW): Anthropic <tool_use> format (may contain <invoke> or JSON)
+    ('<tool_use>', '</tool_use>', '_parse_invoke_fc_payload'),
+]
+
+# Pre-compiled regex for each format: (begin_escaped, end_escaped, compiled_pattern, parser_name)
+_TEXT_FC_PATTERNS = [
+    (re.escape(b), re.escape(e), re.compile(re.escape(b) + r'(.*?)' + re.escape(e), re.DOTALL), p)
+    for (b, e, p) in _TEXT_FC_PARSERS
+]
+
+# All begin markers (for streaming detection + zero-overhead skip check)
+_TEXT_FC_BEGIN_MARKERS = [b for (b, _, _) in _TEXT_FC_PARSERS]
+
+# Backwards-compat aliases (v9 code references these; v10 keeps them as aliases)
+_TEXT_FC_BEGIN = _TEXT_FC_PARSERS[0][0]
+_TEXT_FC_END = _TEXT_FC_PARSERS[0][1]
+_TEXT_FC_PATTERN = _TEXT_FC_PATTERNS[0][2]
+
+
+def _parse_seed_fc_payload(raw: str, model_id: str = '') -> list[dict]:
+    """Parse seed:tool_call XML-like format.
+
+    Example:
+        <function name="get_pm_entry_detail">
+            <parameter name="entry_id" string="true">c247a182-...</parameter>
+        </function>
+
+    Note: 'string="true"' attribute is ignored (Doubao artifact).
+    """
+    tool_calls = []
+    func_pattern = re.compile(r'<function\s+name="([^"]+)">(.*?)</function>', re.DOTALL)
+    for func_match in func_pattern.finditer(raw):
+        name = func_match.group(1).strip()
+        body = func_match.group(2)
+        param_pattern = re.compile(
+            r'<parameter\s+name="([^"]+)"(?:\s+\w+="[^"]*")?>(.*?)</parameter>',
+            re.DOTALL,
+        )
+        params = {}
+        for param_match in param_pattern.finditer(body):
+            p_name = param_match.group(1).strip()
+            p_value = param_match.group(2).strip()
+            params[p_name] = p_value
+        tool_calls.append(
+            {
+                'id': f'call_{uuid4().hex[:24]}',
+                'type': 'function',
+                'function': {
+                    'name': name,
+                    'arguments': json.dumps(params, ensure_ascii=False),
+                },
+            }
+        )
+    if not tool_calls:
+        log.warning(
+            f"[Bug6-Diag] seed:tool_call matched but no <function> parsed. "
+            f"Model={model_id}. Raw: {raw[:200]}"
+        )
+    return tool_calls
+
+
+def _parse_invoke_fc_payload(raw: str, model_id: str = '') -> list[dict]:
+    """Parse <invoke name="..."><parameter name="...">value</parameter></invoke> format.
+
+    Claude/GLM-style text-form FC. Typically wrapped in <function_calls>...</function_calls>
+    or <tool_use>...</tool_use>, but the wrapper is stripped by extract_text_function_calls
+    before this parser runs — so `raw` is the inner content.
+
+    Example (raw content inside <function_calls>...</function_calls>):
+        <invoke name="get_pm_entry_detail">
+            <parameter name="entry_id">c247a182-407c-4c9e-b966-8af968c3b214</parameter>
+        </invoke>
+
+    Multiple <invoke> blocks may appear in a single raw payload (batched tool calls).
+    """
+    tool_calls = []
+    invoke_pattern = re.compile(r'<invoke\s+name="([^"]+)">(.*?)</invoke>', re.DOTALL)
+    for invoke_match in invoke_pattern.finditer(raw):
+        name = invoke_match.group(1).strip()
+        body = invoke_match.group(2)
+        param_pattern = re.compile(
+            r'<parameter\s+name="([^"]+)"(?:\s+\w+="[^"]*")?>(.*?)</parameter>',
+            re.DOTALL,
+        )
+        params = {}
+        for param_match in param_pattern.finditer(body):
+            p_name = param_match.group(1).strip()
+            p_value = param_match.group(2).strip()
+            params[p_name] = p_value
+        tool_calls.append(
+            {
+                'id': f'call_{uuid4().hex[:24]}',
+                'type': 'function',
+                'function': {
+                    'name': name,
+                    'arguments': json.dumps(params, ensure_ascii=False),
+                },
+            }
+        )
+    if not tool_calls:
+        log.warning(
+            f"[Bug6-Diag] <invoke> pattern matched but no <invoke name=\"...\"> parsed. "
+            f"Model={model_id}. Raw: {raw[:200]}"
+        )
+    return tool_calls
+
+
+def _parse_json_fc_payload(raw: str, model_id: str = '') -> list[dict]:
+    """Parse JSON-format FC payload (array or single object). Fallback to ast.literal_eval."""
+    parsed = None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        try:
+            parsed = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            log.warning(
+                f"[Bug6-Diag] Failed to parse JSON FC payload. Model={model_id}. "
+                f"Raw: {raw[:200]}"
+            )
+            return []
+
+    if not isinstance(parsed, list):
+        parsed = [parsed]
+
+    tool_calls = []
+    for call in parsed:
+        if not isinstance(call, dict):
+            continue
+        name = call.get('name')
+        params = call.get('parameters') or call.get('arguments') or {}
+        if not name:
+            continue
+        tool_calls.append(
+            {
+                'id': f'call_{uuid4().hex[:24]}',
+                'type': 'function',
+                'function': {
+                    'name': name,
+                    'arguments': json.dumps(params, ensure_ascii=False)
+                    if not isinstance(params, str)
+                    else params,
+                },
+            }
+        )
+    return tool_calls
+
+
+def extract_text_function_calls(content: str, model_id: str = '') -> tuple[str, list[dict]]:
+    """Extract text-form function calls from content stream (multi-format).
+
+    Returns (cleaned_content, tool_calls) where:
+    - cleaned_content: content with all FC text blocks stripped
+    - tool_calls: list of OpenAI-style tool_call dicts ready for execution loop
+
+    Supports formats (D91, D95):
+    - <|FunctionCallBegin|>...<|FunctionCallEnd|> (Doubao JSON)
+    - seed:tool_call<function>...</function></seed:tool_call> (Doubao XML-like)
+    - <tool_call>...</tool_call> (common variant)
+    - <function_call>...</function_call> (common variant)
+    - <|tool_calls_begin|>...<|tool_calls_end|> (common variant)
+    - <|tool_call_start|>...<|tool_call_end|> (common variant)
+
+    Pattern-detection-first: zero overhead when no begin marker is present.
+    Fail-open: if pattern is malformed, returns (original_content, []) so chat doesn't break.
+    """
+    if not content:
+        return content, []
+
+    # Quick check: skip if no begin marker is present (zero overhead for non-Doubao)
+    has_any = any(marker in content for marker in _TEXT_FC_BEGIN_MARKERS)
+    if not has_any:
+        return content, []
+
+    tool_calls: list[dict] = []
+    cleaned_content = content
+
+    for (begin, end, pattern, parser_name) in _TEXT_FC_PATTERNS:
+        if begin not in cleaned_content:
+            continue
+
+        matches = list(pattern.finditer(cleaned_content))
+        if not matches:
+            # Partial pattern: begin present but no end
+            log.warning(
+                f"[Bug6-Diag] Partial text-form FC (no end marker). "
+                f"Model={model_id}, Format={begin}, Content tail: ...{cleaned_content[-200:]}"
+            )
+            continue
+
+        parser_fn = (
+            _parse_seed_fc_payload
+            if parser_name == '_parse_seed_fc_payload'
+            else _parse_invoke_fc_payload
+            if parser_name == '_parse_invoke_fc_payload'
+            else _parse_json_fc_payload
+        )
+        pattern_calls_count = 0
+        for match in matches:
+            raw = match.group(1).strip()
+            calls = parser_fn(raw, model_id)
+            tool_calls.extend(calls)
+            pattern_calls_count += len(calls)
+
+        cleaned_content = pattern.sub('', cleaned_content).strip()
+
+        # Bug 6 (v12): Per-pattern diagnostic — begin marker detected, full pattern
+        # matched, but parser extracted 0 tool_calls. Indicates format drift within
+        # a known pattern (e.g., <function_calls> wrapper but unknown inner tag).
+        if pattern_calls_count == 0:
+            log.warning(
+                f"[Bug6-Diag] Begin marker '{begin}' detected but 0 tool_calls parsed. "
+                f"Model={model_id}. Possible format drift. "
+                f"Content head: {content[:300]}"
+            )
+
+    if tool_calls:
+        log.warning(
+            f"[Bug6-Diag] Text-form FC detected. Model={model_id}, "
+            f"Tools={[t['function']['name'] for t in tool_calls]}"
+        )
+
+    return cleaned_content, tool_calls
+
+
 def _split_tool_calls(
     tool_calls: list[dict],
 ) -> list[dict]:
@@ -2838,6 +3081,92 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if mcp_clients:
             metadata['mcp_clients'] = mcp_clients
 
+        # PM 项目上下文注入：当 pm_project_id 存在时，先做意图识别，
+        # 相关才注入 system 消息 + 注册 PM 工具（不限 function_calling 模式）
+        pm_project_id = metadata.get('pm_project_id')
+        if pm_project_id:
+            log.info(
+                f'[PM Context] Injecting for project_id={pm_project_id}, '
+                f'user={user.id if user else None}'
+            )
+            try:
+                from open_webui.pm.chat_context import (
+                    build_pm_context_system_message,
+                    is_pm_related_query,
+                )
+                from open_webui.utils.tools import get_pm_builtin_tools
+                from open_webui.models.pm import PMProjects
+
+                # 取用户最新消息作为意图识别输入
+                messages = form_data.get('messages', [])
+                user_msgs = [m for m in messages if m.get('role') == 'user']
+                latest_user_msg = ''
+                if user_msgs:
+                    raw_content = user_msgs[-1].get('content', '')
+                    if isinstance(raw_content, list):
+                        # 多模态消息，提取 text 部分
+                        latest_user_msg = ' '.join(
+                            p.get('text', '')
+                            for p in raw_content
+                            if isinstance(p, dict) and p.get('type') == 'text'
+                        )
+                    else:
+                        latest_user_msg = raw_content or ''
+
+                # 拉取项目名（用于意图识别 prompt）
+                pm_project_obj = await PMProjects.get_project_by_id(pm_project_id)
+                pm_project_name = pm_project_obj.name if pm_project_obj else '未知项目'
+
+                # 意图识别（task_model_id 已在本函数 L2443 计算）
+                is_pm_related = await is_pm_related_query(
+                    request,
+                    user,
+                    form_data.get('model', ''),
+                    latest_user_msg,
+                    pm_project_name,
+                )
+                log.info(f'[PM Context] Intent recognition: is_pm_related={is_pm_related}')
+
+                if not is_pm_related:
+                    log.info('[PM Context] Skipping injection — user query not PM-related')
+                else:
+                    # 1. 注册 PM 工具到 tools_dict（不限 function_calling 模式）
+                    pm_tools = await get_pm_builtin_tools(request, extra_params, user)
+                    tools_available = bool(pm_tools)
+
+                    # 2. 构建 system 消息（带 tools_available 标志，控制措辞）
+                    pm_context_msg = await build_pm_context_system_message(
+                        pm_project_id, user, tools_available=tools_available
+                    )
+                    if pm_context_msg:
+                        log.info(
+                            f'[PM Context] System message built, length={len(pm_context_msg)}'
+                        )
+                        # 如果第一条是 system 消息，追加到其后；否则 prepend
+                        if messages and messages[0].get('role') == 'system':
+                            messages[0]['content'] = messages[0]['content'] + '\n\n' + pm_context_msg
+                        else:
+                            messages.insert(0, {'role': 'system', 'content': pm_context_msg})
+                        form_data['messages'] = messages
+
+                        # 3. 把 PM 工具加到 tools_dict（下游 L2901-2916 会按 FC 模式分发）
+                        for name, tool_dict in pm_tools.items():
+                            if name not in tools_dict:
+                                tools_dict[name] = tool_dict
+                        log.info(
+                            f'[PM Context] Registered {len(pm_tools)} PM tools: '
+                            f'{list(pm_tools.keys())}'
+                        )
+                    else:
+                        log.warning(
+                            '[PM Context] build_pm_context_system_message returned None '
+                            '— access denied or project not found'
+                        )
+            except Exception as e:
+                log.warning(f'[PM Context] Injection failed: {e}', exc_info=True)
+        else:
+            log.debug('[PM Context] No pm_project_id in metadata — skipping injection')
+
         # Inject builtin tools for native function calling based on enabled features and model capability
         # Check if builtin_tools capability is enabled for this model (defaults to True if not specified)
         builtin_tools_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get(
@@ -3475,6 +3804,23 @@ async def non_streaming_chat_response_handler(response, ctx):
             if choices and choices[0].get('message', {}).get('content'):
                 content = response_data['choices'][0]['message']['content']
 
+                # Bug 11 (v11): Non-streaming FC parser — defense-in-depth.
+                # Mirror streaming handler's L4828-4861 logic. Catches leaked
+                # text-form FC tokens (seed:tool_call etc.) that bypass native FC.
+                # Also merges text-parsed tool_calls into message.tool_calls so
+                # the main pipeline can execute them.
+                model_id_for_fc = response_data.get('model', '')
+                cleaned_content_fc, text_tool_calls_fc = extract_text_function_calls(
+                    content, model_id_for_fc
+                )
+                if text_tool_calls_fc:
+                    content = cleaned_content_fc
+                    # Update response_data so downstream code sees cleaned content
+                    response_data['choices'][0]['message']['content'] = content
+                    # Merge text-parsed tool_calls with native ones
+                    native_tc = response_data['choices'][0]['message'].get('tool_calls', []) or []
+                    response_data['choices'][0]['message']['tool_calls'] = native_tc + text_tool_calls_fc
+
                 if content:
                     await event_emitter(
                         {
@@ -3602,7 +3948,12 @@ async def streaming_chat_response_handler(response, ctx):
     # and pyodide code interpreter. Server-side tools work without it.
     if event_emitter:
         task_id = str(uuid4())  # Create a unique task ID.
-        model_id = form_data.get('model', '')
+        # Use a mutable dict container instead of `nonlocal model_id`. The inner
+        # response_handler rebinds this when a stream chunk carries a new
+        # 'selected_model_id' (e.g. arena rerouting), and later reads it for FC
+        # diagnostics and multi-round payload construction. A dict avoids the
+        # nonlocal declaration entirely while preserving identical semantics.
+        model_state = {'id': form_data.get('model', '')}
 
         # Handle as a background task
         async def response_handler(response, events):
@@ -3927,6 +4278,15 @@ async def streaming_chat_response_handler(response, ctx):
 
                     response_tool_calls = []
 
+                    # Bug 6 (v10): Multi-format text-form FC leak suppression state.
+                    # When capturing=True, incoming value chunks are buffered instead of emitted
+                    # to the user. Buffer is parsed when the matched format's end marker arrives.
+                    # text_fc_format tracks which (begin, end, parser) tuple is active so we know
+                    # which end marker to look for during capture.
+                    text_fc_capturing = False
+                    text_fc_buffer = ''
+                    text_fc_format = None  # (begin, end, parser_name) tuple from _TEXT_FC_PARSERS
+
                     delta_count = 0
                     delta_chunk_size = max(
                         CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
@@ -3979,12 +4339,12 @@ async def streaming_chat_response_handler(response, ctx):
                                     await event_emitter(data.get('event', {}))
 
                                 if 'selected_model_id' in data:
-                                    model_id = data['selected_model_id']
+                                    model_state['id'] = data['selected_model_id']
                                     await Chats.upsert_message_to_chat_by_id_and_message_id(
                                         metadata['chat_id'],
                                         metadata['message_id'],
                                         {
-                                            'selectedModelId': model_id,
+                                            'selectedModelId': model_state['id'],
                                         },
                                     )
                                     await event_emitter(
@@ -4260,6 +4620,52 @@ async def streaming_chat_response_handler(response, ctx):
 
                                         data = {'content': serialize_output(full_output())}
 
+                                    # Bug 6 (v10): Intercept multi-format text-form FC tokens.
+                                    # Detection: check each begin marker in _TEXT_FC_PARSERS.
+                                    # Suppress emission during capture; convert to tool_calls on completion.
+                                    if value:
+                                        if text_fc_capturing:
+                                            text_fc_buffer += value
+                                            end_marker = text_fc_format[1]
+                                            if end_marker in text_fc_buffer:
+                                                cleaned, new_tool_calls = extract_text_function_calls(
+                                                    text_fc_buffer, model_state['id']
+                                                )
+                                                if new_tool_calls:
+                                                    response_tool_calls.extend(new_tool_calls)
+                                                text_fc_buffer = ''
+                                                text_fc_capturing = False
+                                                text_fc_format = None
+                                                value = cleaned if cleaned else None
+                                            else:
+                                                value = None  # keep buffering, suppress emission
+                                        else:
+                                            # Check each format's begin marker; first match wins.
+                                            for fmt in _TEXT_FC_PARSERS:
+                                                begin = fmt[0]
+                                                if begin in value:
+                                                    idx = value.index(begin)
+                                                    pre_text = value[:idx]
+                                                    rest = value[idx:]
+                                                    end = fmt[1]
+                                                    if end in rest:
+                                                        # Complete pattern in single chunk
+                                                        cleaned, new_tool_calls = extract_text_function_calls(
+                                                            rest, model_state['id']
+                                                        )
+                                                        if new_tool_calls:
+                                                            response_tool_calls.extend(new_tool_calls)
+                                                        value = (pre_text + cleaned) if cleaned else pre_text
+                                                        if not value:
+                                                            value = None
+                                                    else:
+                                                        # Start capturing
+                                                        text_fc_buffer = rest
+                                                        text_fc_capturing = True
+                                                        text_fc_format = fmt
+                                                        value = pre_text if pre_text else None
+                                                    break  # only one begin marker can match per chunk
+
                                     if value:
                                         if (
                                             output
@@ -4504,6 +4910,41 @@ async def streaming_chat_response_handler(response, ctx):
                                 )
                         if responses_api_tool_calls:
                             tool_calls.append(_split_tool_calls(responses_api_tool_calls))
+
+                    # Bug 6 (v10): Non-streaming fallback for multi-format text-form FC patterns.
+                    # Catches patterns that survived streaming interception
+                    # (e.g., partial pattern at stream end, or truly non-streamed response).
+                    # Also flush any partial capture left open at stream end (fail-open).
+                    if text_fc_capturing and text_fc_buffer:
+                        log.warning(
+                            f"[Bug6-Diag] Stream ended with uncaptured text-form FC. "
+                            f"Model={model_state['id']}, Format={text_fc_format[0] if text_fc_format else 'unknown'}. "
+                            f"Flushing buffer to content (fail-open)."
+                        )
+                        content = f'{content}{text_fc_buffer}'
+                        text_fc_buffer = ''
+                        text_fc_capturing = False
+                        text_fc_format = None
+
+                    if content and any(m in content for m in _TEXT_FC_BEGIN_MARKERS):
+                        cleaned_content, text_fc_tool_calls = extract_text_function_calls(
+                            content, model_state['id']
+                        )
+                        if text_fc_tool_calls:
+                            # Update accumulated content (affects saved message)
+                            content = cleaned_content
+                            # Best-effort cleanup of output message text: strip all FC patterns
+                            for item in output:
+                                if item.get('type') == 'message':
+                                    for part in item.get('content', []):
+                                        if part.get('type') == 'output_text':
+                                            part_text = part.get('text', '')
+                                            if any(m in part_text for m in _TEXT_FC_BEGIN_MARKERS):
+                                                for (_, _, pat, _) in _TEXT_FC_PATTERNS:
+                                                    part_text = pat.sub('', part_text)
+                                                part['text'] = part_text.strip()
+                            # Queue tool calls for execution
+                            tool_calls.append(_split_tool_calls(text_fc_tool_calls))
 
                 try:
                     await stream_body_handler(response, form_data)
@@ -4824,7 +5265,7 @@ async def streaming_chat_response_handler(response, ctx):
                     try:
                         new_form_data = {
                             **form_data,
-                            'model': model_id,
+                            'model': model_state['id'],
                             'stream': True,
                             'metadata': metadata,
                         }
@@ -5075,7 +5516,7 @@ async def streaming_chat_response_handler(response, ctx):
                         try:
                             new_form_data = {
                                 **form_data,
-                                'model': model_id,
+                                'model': model_state['id'],
                                 'stream': True,
                                 'metadata': metadata,
                                 'messages': [

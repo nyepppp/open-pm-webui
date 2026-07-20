@@ -1,50 +1,84 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { getEntries } from '$lib/apis/pm/index';
+	import { createRelation, deleteRelation, getRelationList } from '$lib/apis/pm/relation';
 	import { toast } from 'svelte-sonner';
+
+	interface Binding {
+		entityType: string;
+		entityId: string;
+		entityName: string;
+		versionId?: string;
+		versionNumber?: string;
+		boundAt?: number;
+		boundBy?: string;
+	}
 
 	interface Props {
 		projectId: string;
-		currentBinding?: {
-			entityType: string;
-			entityId: string;
-			entityName: string;
-			versionId?: string;
-		};
-		onBind: (binding: {
-			entityType: string;
-			entityId: string;
-			entityName: string;
-			versionId?: string;
-		}) => void;
+		entryId?: string;
+		currentBinding?: Binding;
+		onBind: (binding: Binding) => void;
 		onUnbind: () => void;
 	}
 
-	let { projectId, currentBinding, onBind, onUnbind }: Props = $props();
+	let { projectId, entryId = '', currentBinding, onBind, onUnbind }: Props = $props();
 
 	let selectedType = $state(currentBinding?.entityType || '');
-	let selectedEntity = $state(currentBinding || null);
+	let selectedEntity = $state<Binding | null>(currentBinding || null);
 	let searchQuery = $state('');
 	let entities = $state<any[]>([]);
 	let loading = $state(false);
+	let bindingRelationId = $state<string | null>(null);
+	let binding = $state<Binding | undefined>(currentBinding);
 
 	const entityTypes = [
 		{ value: 'prd', label: 'PRD', module: 'prd' },
-		{ value: 'module', label: '模块', module: 'architecture' },
+		{ value: 'module', label: '模块', module: 'product-architecture' },
 		{ value: 'feature', label: '功能', module: 'requirement' },
 		{ value: 'parameter', label: '参数', module: 'parameter' }
 	];
 
+	const typeLabel = (t: string) => entityTypes.find(x => x.value === t)?.label || t;
+
 	async function loadEntities() {
 		if (!selectedType) return;
 		loading = true;
+		entities = [];
+		const typeConfig = entityTypes.find(t => t.value === selectedType);
 		try {
-			const typeConfig = entityTypes.find(t => t.value === selectedType);
-			if (!typeConfig) return;
+			if (!typeConfig) {
+				toast.error(`未知的实体类型: ${selectedType}`);
+				return;
+			}
 			const token = (typeof localStorage !== 'undefined' && localStorage.token) || '';
+			if (!token) {
+				toast.error('请先登录');
+				return;
+			}
+			if (!projectId) {
+				toast.error('未选择项目');
+				return;
+			}
 			const result = await getEntries(token, projectId, typeConfig.module);
-			entities = Array.isArray(result) ? result : [];
-		} catch (e) {
-			toast.error('加载实体失败');
+			if (!Array.isArray(result)) {
+				console.error('API返回非数组数据:', result);
+				toast.error('加载实体失败: 服务器返回数据格式错误');
+				return;
+			}
+			entities = result;
+		} catch (e: any) {
+			console.error('加载实体失败:', e);
+			const message = e?.message || '未知错误';
+			if (message.includes('404')) {
+				toast.error(`模块 "${typeConfig?.label || selectedType}" 暂无数据`);
+			} else if (message.includes('403')) {
+				toast.error('权限不足，无法访问该模块');
+			} else if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+				toast.error('网络错误，请检查网络连接');
+			} else {
+				toast.error(`加载实体失败: ${message}`);
+			}
 		} finally {
 			loading = false;
 		}
@@ -60,14 +94,62 @@
 		selectedEntity = {
 			entityType: selectedType,
 			entityId: entity.id,
-			entityName: entity.title || entity.name || '未命名'
+			entityName: entity.title || entity.name || '未命名',
+			versionId: entity.versionId || entity.currentVersionId
 		};
 	}
 
-	function handleBind() {
+	async function handleBind() {
 		if (!selectedEntity) return;
 		onBind(selectedEntity);
+		binding = { ...selectedEntity, boundAt: Date.now() };
+		toast.success(`已绑定到 ${selectedEntity.entityName}`);
+		// Backend: create relation so binding appears on the traceability page (best-effort, local-first)
+		if (entryId && projectId) {
+			try {
+				const created = await createRelation(projectId, {
+					entityAId: entryId,
+					entityBId: selectedEntity.entityId,
+					relationType: 'references',
+					confidence: 100,
+					confirmed: 1,
+					createdBy: 'user'
+				} as any);
+				bindingRelationId = created?.id || null;
+			} catch (e: any) {
+				console.warn('[EntityBindingPanel] createRelation failed:', e?.message);
+			}
+		}
 	}
+
+	async function handleUnbindClick() {
+		// Backend: delete the relation (best-effort)
+		if (projectId && entryId) {
+			try {
+				if (bindingRelationId) {
+					await deleteRelation(projectId, bindingRelationId);
+				} else {
+					const relations = await getRelationList(projectId, entryId);
+					const rel = relations.find(r => r.relationType === 'references');
+					if (rel) await deleteRelation(projectId, rel.id);
+				}
+			} catch (e: any) {
+				console.warn('[EntityBindingPanel] deleteRelation failed:', e?.message);
+			}
+		}
+		bindingRelationId = null;
+		binding = undefined;
+		onUnbind();
+		toast.success('已解绑');
+	}
+
+	onMount(() => {
+		// Auto-load entities if a binding already exists, so the panel shows context immediately
+		if (currentBinding?.entityType) {
+			selectedType = currentBinding.entityType;
+			loadEntities();
+		}
+	});
 
 	let filteredEntities = $derived(
 		entities.filter(e => {
@@ -78,6 +160,34 @@
 </script>
 
 <div class="space-y-4">
+	<!-- Bound summary card (when a binding exists) -->
+	{#if binding}
+		<div class="rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 p-3">
+			<div class="flex items-center justify-between mb-1">
+				<span class="text-xs font-medium text-green-700 dark:text-green-300">已绑定</span>
+				<button
+					class="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+					onclick={handleUnbindClick}
+				>
+					解绑
+				</button>
+			</div>
+			<div class="text-sm font-medium text-gray-900 dark:text-gray-100">{binding.entityName}</div>
+			<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+				类型: {typeLabel(binding.entityType)}
+				{#if binding.versionId}· 版本: {binding.versionId}{/if}
+				{#if binding.boundAt}· 绑定于 {new Date(binding.boundAt).toLocaleString('zh-CN')}{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Instruction (only when no binding) -->
+	{#if !binding}
+		<p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+			选择要绑定的实体类型，然后从列表中选择实体并点击「绑定实体」。绑定后可在溯源页面查看关联关系。
+		</p>
+	{/if}
+
 	<!-- Entity Type Selection -->
 	<div>
 		<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">实体类型</label>
@@ -147,13 +257,5 @@
 		>
 			绑定实体
 		</button>
-		{#if currentBinding}
-			<button
-				class="px-3 py-2 text-sm bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/30 dark:text-red-400 rounded-lg transition"
-				onclick={onUnbind}
-			>
-				解绑
-			</button>
-		{/if}
 	</div>
 </div>

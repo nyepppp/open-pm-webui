@@ -29,7 +29,7 @@
 		flowchart: 'M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5'
 	};
 
-	const moduleGroups = [
+	let moduleGroups = $derived([
 		{
 			id: 'plan', label: '规划', modules: [
 				{ id: 'prd', label: 'PRD 文档', desc: '产品需求文档', href: `/pm/${projectId}/prd` },
@@ -66,9 +66,9 @@
 				{ id: 'requirement-boundary', label: '需求边界', desc: '需求边界分析', href: `/pm/${projectId}/requirement-boundary` }
 			]
 		}
-	];
+	]);
 
-	const allModules = moduleGroups.flatMap(g => g.modules);
+	const allModules = $derived(moduleGroups.flatMap(g => g.modules));
 
 	// Stats
 	let moduleCounts = $state<Record<string, number>>({});
@@ -189,7 +189,7 @@
 
 	function getVersionLabel(vid: string): string {
 		const v = $versionList.find((v: any) => v.id === vid);
-		return v?.versionNumber || vid.slice(0, 6);
+		return v?.versionNumber || v?.version_number || '';
 	}
 </script>
 
@@ -278,9 +278,9 @@
 				<h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{group.label}</h3>
 				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 					{#each group.modules as mod (mod.id)}
-						<button
+						<a
 							class="flex items-center gap-3 p-4 bg-white dark:bg-gray-850 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700 hover:shadow-sm transition text-left"
-							type="button"
+							href={mod.href}
 							onclick={(e) => {
 								e.preventDefault();
 								goto(mod.href);
@@ -298,7 +298,7 @@
 							{#if moduleCounts[mod.id] !== undefined}
 								<span class="text-xs font-medium text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full flex-shrink-0">{moduleCounts[mod.id]}</span>
 							{/if}
-						</button>
+						</a>
 					{/each}
 				</div>
 			</div>
@@ -353,9 +353,9 @@
 		{:else}
 			<div class="bg-white dark:bg-gray-850 rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-50 dark:divide-gray-800">
 				{#each pagedRecentItems as item (item.id)}
-					<button
+					<a
 						class="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition text-left"
-						onclick={() => goto(getModuleHref(item.module_type || item.moduleType))}
+						href={getModuleHref(item.module_type || item.moduleType)}
 					>
 						<div class="flex-shrink-0 w-4 h-4 text-gray-400 dark:text-gray-500">
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
@@ -370,7 +370,7 @@
 							<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 flex-shrink-0">{getVersionLabel(item.versionId || (item.data || item.metadata || {}).versionId)}</span>
 						{/if}
 						<span class="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">{formatTime(item.updated_at || item.updatedAt)}</span>
-					</button>
+					</a>
 				{/each}
 			</div>
 

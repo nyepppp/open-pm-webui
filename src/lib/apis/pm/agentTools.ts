@@ -102,6 +102,84 @@ const toolRegistry: Record<string, ToolFunction> = {
 			return { success: false, error: err instanceof Error ? err.message : String(err) };
 		}
 	},
+
+	// D43: 批量写入工具 —— 前端循环调 agentToolCreateEntry 实现 batch。
+	// 与后端 builtin tool `pm_entry_batch_create` 配对：AI 通过 function calling 调 preview，
+	// 用户确认后前端通过本条目循环调单条 create 实现真实写入。
+	'pm.entry.batchCreate': async (ctx, payload) => {
+		try {
+			const entries = (payload.entries as Array<Record<string, unknown>>) || [];
+			const moduleType = (payload.module_type as string) || ctx.moduleType || '';
+			if (!moduleType) {
+				return { success: false, error: 'module_type 必填' };
+			}
+			if (!entries.length) {
+				return { success: false, error: 'entries 不能为空' };
+			}
+			const created: unknown[] = [];
+			const failed: Array<{ title?: string; error: string }> = [];
+			for (const entry of entries) {
+				try {
+					const result = await agentToolCreateEntry(ctx.token, {
+						project_id: ctx.projectId,
+						module_type: moduleType,
+						title: entry.title,
+						content: entry.content,
+						data: entry.data,
+						status: entry.status || 'draft',
+						priority: entry.priority,
+					});
+					created.push(result);
+				} catch (err) {
+					failed.push({
+						title: entry.title as string | undefined,
+						error: err instanceof Error ? err.message : String(err)
+					});
+				}
+			}
+			return {
+				success: failed.length === 0,
+				data: { created, failed, total: entries.length, success_count: created.length }
+			};
+		} catch (err) {
+			return { success: false, error: err instanceof Error ? err.message : String(err) };
+		}
+	},
+
+	// D43/D38: 批量写入预览 —— 前端不调 HTTP，仅作为 toolRegistry 占位。
+	// 实际预览由 AI 通过 function calling 直接调后端 builtin tool `pm_entry_batch_create_preview`，
+	// 前端在 chat message 渲染处检测响应的 `confirm_tool` 字段并渲染 EntryBatchCreatePreview.svelte。
+	'pm.entry.batchCreatePreview': async (ctx, payload) => {
+		// 不真实写入，仅返回结构化预览（与后端 builtin tool 行为一致）
+		const entries = (payload.entries as Array<Record<string, unknown>>) || [];
+		const moduleType = (payload.module_type as string) || ctx.moduleType || '';
+		const warnings: string[] = [];
+		const preview: Array<{ index: number; title: string; content_preview: string; data_keys?: string[] }> = [];
+		entries.forEach((entry, i) => {
+			const title = String(entry.title || '').trim();
+			if (!title) {
+				warnings.push(`第 ${i + 1} 条缺少 title，将被跳过`);
+				return;
+			}
+			const contentRaw = String(entry.content || '');
+			preview.push({
+				index: i,
+				title,
+				content_preview: contentRaw.slice(0, 80) + (contentRaw.length > 80 ? '...' : ''),
+				data_keys: entry.data && typeof entry.data === 'object' ? Object.keys(entry.data as Record<string, unknown>) : []
+			});
+		});
+		return {
+			success: true,
+			data: {
+				preview,
+				will_create_count: preview.length,
+				warnings,
+				confirm_tool: 'pm_entry_batch_create',
+				module_type: moduleType
+			}
+		};
+	},
 };
 
 // ============================================================================

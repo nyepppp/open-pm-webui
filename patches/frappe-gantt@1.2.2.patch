@@ -1,0 +1,15 @@
+diff --git a/package.json b/package.json
+index 81ada23a9b6722e8a39cae1324e227801f6cd959..b509384e5ef506d33394da2e3fc55b3545f80994 100644
+--- a/package.json
++++ b/package.json
+@@ -25,7 +25,9 @@
+             "require": "./dist/frappe-gantt.umd.js",
+             "import": "./dist/frappe-gantt.es.js",
+             "style": "./dist/frappe-gantt.css"
+-        }
++        },
++        "./src/*": "./src/*",
++        "./src/styles/*": "./src/styles/*"
+     },
+     "keywords": [
+         "gantt",

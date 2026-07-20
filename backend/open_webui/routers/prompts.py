@@ -134,6 +134,125 @@ async def get_prompt_list(
 
 
 ############################
+# Part B: 角色提示词（Role Prompts）
+# 复用 prompts 表，通过 is_role 字段区分；data 字段存储角色配置。
+############################
+
+
+class RoleForm(BaseModel):
+    """升级/更新角色提示词时的表单。
+
+    - system_prompt: 系统提示词，注入到对话 params.system
+    - tools: 启用的工具 ID 列表，注入到对话 params.tools
+    - suggested_models: 建议使用的模型 ID 列表（仅作为提示，不强制）
+    - description: 角色描述（也写入 meta.description 便于列表展示）
+    """
+    system_prompt: str = ''
+    tools: list[str] = []
+    suggested_models: list[str] = []
+    description: str = ''
+
+
+@router.get('/roles', response_model=list[PromptUserResponse])
+async def get_roles(
+    user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    """获取当前用户可见的所有角色提示词（is_role=True）。"""
+    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+        return await Prompts.get_roles(db=db)
+    return await Prompts.get_roles_by_user_id(user.id, 'read', db=db)
+
+
+@router.post('/id/{prompt_id}/role', response_model=PromptModel | None)
+async def upgrade_to_role(
+    prompt_id: str,
+    form_data: RoleForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """将普通 prompt 升级为角色（或更新已存在的角色配置）。
+
+    权限要求：与 update_prompt_by_id 一致（owner / write access / admin）。
+    """
+    prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
+    if not prompt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        prompt.user_id != user.id
+        and not await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='prompt',
+            resource_id=prompt.id,
+            permission='write',
+            db=db,
+        )
+        and user.role != 'admin'
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    role_data = {
+        'system_prompt': form_data.system_prompt,
+        'tools': form_data.tools,
+        'suggested_models': form_data.suggested_models,
+        'description': form_data.description,
+    }
+
+    updated = await Prompts.set_role_flag(prompt.id, is_role=True, role_data=role_data, db=db)
+    if updated:
+        return updated
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=ERROR_MESSAGES.DEFAULT(),
+    )
+
+
+@router.delete('/id/{prompt_id}/role', response_model=PromptModel | None)
+async def remove_role(
+    prompt_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """取消角色标记（is_role=False，保留 data 内容）。"""
+    prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
+    if not prompt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        prompt.user_id != user.id
+        and not await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='prompt',
+            resource_id=prompt.id,
+            permission='write',
+            db=db,
+        )
+        and user.role != 'admin'
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    updated = await Prompts.set_role_flag(prompt.id, is_role=False, role_data=None, db=db)
+    if updated:
+        return updated
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=ERROR_MESSAGES.DEFAULT(),
+    )
+
+
+############################
 # CreateNewPrompt
 ############################
 

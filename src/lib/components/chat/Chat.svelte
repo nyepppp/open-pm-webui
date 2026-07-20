@@ -51,6 +51,7 @@
 		chatRequestQueues,
 		desktopEvent
 	} from '$lib/stores';
+	import { currentProject } from '$lib/stores/pm/projectStore';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -98,6 +99,7 @@
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getFunctions } from '$lib/apis/functions';
 	import { updateFolderById } from '$lib/apis/folders';
+	import { executeWorkflow } from '$lib/apis/workflow';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -155,6 +157,10 @@
 	let selectedSkillIds = [];
 	let selectedFilterIds = [];
 	let pendingOAuthTools = [];
+
+	// Part B: 角色提示词 — 当前会话选中的角色
+	// 选中后，role.system_prompt 会注入到 params.system，role.tools 会合并进 selectedToolIds
+	let selectedRole: any = null;
 
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
@@ -1750,9 +1756,62 @@
 		if (messages.length === 0) {
 			await initChatHandler(history);
 		} else {
-			await saveChatHandler($chatId, history);
+		await saveChatHandler($chatId, history);
+	}
+};
+
+	// D16: 检测 AI 回复中的 execute_workflow JSON 块
+	function detectWorkflowExecution(
+		responseText: string
+	): { workflowId: string; inputs: Record<string, any> } | null {
+		if (!responseText) return null;
+		// 优先匹配 ```json {...}``` 块
+		const jsonBlockMatch = responseText.match(/```json\s*(\{[\s\S]*?\})\s*```/);
+		if (jsonBlockMatch) {
+			try {
+				const obj = JSON.parse(jsonBlockMatch[1]);
+				if (obj.action === 'execute_workflow' && obj.workflow_id && obj.inputs) {
+					return { workflowId: obj.workflow_id, inputs: obj.inputs };
+				}
+			} catch (_) {
+				/* fallthrough */
+			}
 		}
-	};
+		// 兜底：匹配裸 JSON 对象（无 markdown 包裹）
+		const bareMatch = responseText.match(/\{\s*"action"\s*:\s*"execute_workflow"[\s\S]*?\}/);
+		if (bareMatch) {
+			try {
+				const obj = JSON.parse(bareMatch[0]);
+				if (obj.workflow_id && obj.inputs) {
+					return { workflowId: obj.workflow_id, inputs: obj.inputs };
+				}
+			} catch (_) {
+				/* fallthrough */
+			}
+		}
+		return null;
+	}
+
+	// D16: 执行工作流（从 chat 触发）
+	async function executeWorkflowFromChat(workflowId: string, inputs: Record<string, any>) {
+		try {
+			const token = localStorage.token;
+			if (!token) {
+				toast.error('未登录，无法执行工作流');
+				return;
+			}
+			// 注入当前选中的 chat model（与 chatCompletionEventHandler 中的 message.model 一致）
+			const chatModelId = $settings?.selectedModel || '';
+			const result = await executeWorkflow(token, workflowId, inputs, chatModelId);
+			const executionId = result?.execution_id || result?.id;
+			toast.success(
+				`工作流已开始执行（execution_id: ${executionId ? String(executionId).slice(0, 8) + '…' : 'N/A'}）`
+			);
+		} catch (e: any) {
+			const msg = e?.message || String(e);
+			toast.error(`工作流执行失败：${msg}`);
+		}
+	}
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
@@ -1900,6 +1959,16 @@
 			await tick();
 			if (autoScroll) {
 				scrollToBottom();
+			}
+
+			// D16: 检测 AI 回复中的 execute_workflow JSON 块并触发执行
+			try {
+				const wfExec = detectWorkflowExecution(message.content);
+				if (wfExec) {
+					await executeWorkflowFromChat(wfExec.workflowId, wfExec.inputs);
+				}
+			} catch (e) {
+				console.warn('[chat] D16 workflow execution failed:', e);
 			}
 
 			// Fire-and-forget: run chatCompletedHandler for background work
@@ -2488,13 +2557,17 @@
 				},
 
 				...(stream && (model.info?.meta?.capabilities?.usage ?? false)
-					? {
-							stream_options: {
-								include_usage: true
-							}
+				? {
+						stream_options: {
+							include_usage: true
 						}
-					: {})
-			},
+					}
+				: {}),
+
+			// PM 项目上下文：选了项目时透传 project_id 给后端，触发 system 消息注入 + builtin 工具注册
+			pm_project_id:
+				$currentProject?.id && $currentProject.id !== 'default' ? $currentProject.id : undefined
+		},
 			`${WEBUI_BASE_URL}/api`
 		).catch(async (error) => {
 			console.log(error);
@@ -3145,6 +3218,7 @@
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged
+									bind:selectedRole
 									toolServers={$toolServers}
 									{generating}
 									{stopResponse}
@@ -3152,6 +3226,18 @@
 									{onUpload}
 									messageQueue={$chatRequestQueues[$chatId] ?? []}
 									{chatTasks}
+									on:roleChange={(e) => {
+										// 角色变更：将 role.system_prompt 注入 params.system
+										// 仅影响后续消息（params 在每次发送时读取，历史消息不变）
+										const role = e.detail;
+										if (role && role.system_prompt) {
+											params = { ...params, system: role.system_prompt };
+										} else {
+											// 取消角色时移除 system（保留其他 params 字段）
+											const { system, ...rest } = params;
+											params = rest;
+										}
+									}}
 									onQueueSendNow={async (id) => {
 										const queue = $chatRequestQueues[$chatId] ?? [];
 										const item = queue.find((m) => m.id === id);
@@ -3226,6 +3312,7 @@
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged
+									bind:selectedRole
 									{pendingOAuthTools}
 									toolServers={$toolServers}
 									{stopResponse}
@@ -3235,6 +3322,16 @@
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data);
+										}
+									}}
+									on:roleChange={(e) => {
+										// 角色变更：注入 system_prompt 到 params.system（仅影响后续消息）
+										const role = e.detail;
+										if (role && role.system_prompt) {
+											params = { ...params, system: role.system_prompt };
+										} else {
+											const { system, ...rest } = params;
+											params = rest;
 										}
 									}}
 									on:submit={async (e) => {

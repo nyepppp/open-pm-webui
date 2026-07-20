@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
-	import { getVersions, createVersion } from '$lib/apis/pm/index';
+	import { getVersions, createVersion, PMApiError } from '$lib/apis/pm/index';
 	import { setCurrentVersion, versions, currentVersion } from '$lib/stores/pm/versionStore';
 	import type { Version } from '$lib/apis/pm/types';
 
@@ -13,6 +13,8 @@
 	let newVersionNumber = $state('');
 	let newVersionLabel = $state<'milestone' | 'release' | 'review' | undefined>(undefined);
 	let newVersionDesc = $state('');
+	// D54/F3: 兜底创建失败时显示 inline 错误条 + 重试按钮
+	let autoCreateError = $state<string | null>(null);
 
 	const labelLabels: Record<string, { l: string; c: string }> = {
 		milestone: { l: '里程碑', c: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
@@ -22,17 +24,55 @@
 
 	async function loadVersions() {
 		isLoading = true;
+		autoCreateError = null;  // F3: 重置错误状态，给重试一个干净起点
 		try {
 			const token = localStorage.token || '';
-			const vList = await getVersions(token, projectId);
-			if (Array.isArray(vList)) {
-				versions.set(vList);
-				if (vList.length > 0 && !$currentVersion) {
-					setCurrentVersion(vList[0]);
-				}
+			let vList = await getVersions(token, projectId);
+			if (!Array.isArray(vList)) vList = [];
+			// D40: 前端兜底 —— 列表为空时自动补建 v1（与后端 D28 双保险，覆盖历史项目）
+			if (vList.length === 0) {
+				try {
+					const v1 = await createVersion(token, projectId, {
+						version_number: 'v1',
+						description: '初始版本'
+					});
+					if (v1) {
+						vList = [v1];
+						toast.info('已自动创建初始版本 v1');
+					}
+				} catch (createErr: any) {
+				const msg = createErr?.message || String(createErr);
+				// K2b: [Bug2-Diag] 标签 + httpStatus 字段 + PMApiError 结构化错误透传
+				const isPMApiErr = createErr instanceof PMApiError;
+				console.error('[Bug2-Diag] auto-create v1 failed:', {
+					projectId,
+					url: `/pm/projects/${projectId}/versions`,
+					error: createErr,
+					message: msg,
+					errorType: createErr?.constructor?.name,
+					httpStatus: isPMApiErr ? createErr.status : null,
+					detail: isPMApiErr ? createErr.detail : null,
+					isNetworkError: createErr instanceof TypeError || /无法连接到后端/.test(msg),
+				});
+				// K2b: PMApiError 时把 HTTP 状态码也放到 amber 错误条里，让用户看到根因
+				const displayMsg = isPMApiErr
+					? `HTTP ${createErr.status}: ${createErr.detail || msg}`
+					: msg;
+				autoCreateError = displayMsg;  // F3: 在空状态界面显示 amber 错误条 + 重试按钮
+				toast.error(`无法自动创建初始版本：${displayMsg}`);
+				// 不抛错，让用户看到「创建第一个版本」按钮手动重试
 			}
-		} catch { versions.set([]); }
-		finally { isLoading = false; }
+			}
+			versions.set(vList);
+			if (vList.length > 0 && !$currentVersion) {
+				setCurrentVersion(vList[0]);
+			}
+		} catch (e: any) {
+			versions.set([]);
+			toast.error(`加载版本列表失败：${e?.message || e}`);
+		} finally {
+			isLoading = false;
+		}
 	}
 
 	onMount(() => { loadVersions(); });
@@ -107,13 +147,25 @@
 		{#if isLoading}
 			<div class="flex items-center justify-center py-12"><div class="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div></div>
 		{:else if sortedVersions.length === 0}
-			<div class="py-12 text-center">
-				<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-1.243.673-2.324 1.673-2.878" /></svg>
-				<p class="text-sm text-gray-500 dark:text-gray-400">还没有版本</p>
-				{#if !showCreateForm}
-					<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showCreateForm = true; }}>创建第一个版本</button>
-				{/if}
-			</div>
+		<div class="py-12 text-center">
+			<svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-1.243.673-2.324 1.673-2.878" /></svg>
+			<p class="text-sm text-gray-500 dark:text-gray-400">还没有版本</p>
+			{#if autoCreateError}
+				<!-- F3: 兜底自动创建失败时显示 amber 错误条 + 重试按钮，让用户看到根因 -->
+				<div class="mt-3 mx-auto max-w-md px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-xs text-left">
+					<div class="font-medium mb-0.5">自动创建初始版本失败</div>
+					<div class="break-all opacity-80">{autoCreateError}</div>
+					<div class="mt-1.5 flex gap-2">
+						<button class="underline hover:opacity-70 transition" onclick={loadVersions}>重试自动创建</button>
+						<span class="opacity-50">·</span>
+						<button class="underline hover:opacity-70 transition" onclick={() => { showCreateForm = true; }}>手动创建</button>
+					</div>
+				</div>
+			{/if}
+			{#if !showCreateForm && !autoCreateError}
+				<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={() => { showCreateForm = true; }}>创建第一个版本</button>
+			{/if}
+		</div>
 		{:else}
 			<div class="px-2.5 py-1 gap-1.5 flex flex-col">
 				{#each sortedVersions as v (vId(v))}

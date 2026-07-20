@@ -7,12 +7,13 @@
 		node: FlowchartNode;
 		parameterEntries?: ModuleEntry[];
 		projectId?: string;
+		entryId?: string;
 		onUpdate: (nodeId: string, data: Partial<FlowchartNode['data']>) => void;
 		onClose: () => void;
 		onViewTraceability?: () => void;
 	}
 
-	let { node, parameterEntries = [], projectId = '', onUpdate, onClose, onViewTraceability }: Props = $props();
+	let { node, parameterEntries = [], projectId = '', entryId = '', onUpdate, onClose, onViewTraceability }: Props = $props();
 
 	let nodeLabel = $state(node.data.label);
 	let nodeDescription = $state(node.data.description || '');
@@ -60,10 +61,11 @@
 		saveChanges();
 	}
 
-	function handleBind(binding: { entityType: string; entityId: string; entityName: string }) {
+	function handleBind(binding: { entityType: string; entityId: string; entityName: string; versionId?: string }) {
 		const traceabilityData = {
 			...binding,
-			boundAt: Date.now()
+			boundAt: Date.now(),
+			boundBy: (typeof localStorage !== 'undefined' && (localStorage as any).user?.email) || 'unknown'
 		};
 		onUpdate(node.id, {
 			traceability: traceabilityData as any
@@ -216,11 +218,12 @@
 		{:else}
 			<!-- Traceability Binding -->
 			<EntityBindingPanel
-				{projectId}
-				currentBinding={node.data.traceability}
-				onBind={handleBind}
-				onUnbind={handleUnbind}
-			/>
+			{projectId}
+			{entryId}
+			currentBinding={node.data.traceability}
+			onBind={handleBind}
+			onUnbind={handleUnbind}
+		/>
 		{/if}
 	</div>
 </div>

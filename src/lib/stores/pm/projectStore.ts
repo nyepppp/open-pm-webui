@@ -12,7 +12,41 @@ import { writable, derived, type Writable, type Readable } from 'svelte/store';
 		updatedAt: Date.now()
 	};
 
-	export const currentProject: Writable<Project | null> = writable(DEFAULT_PROJECT);
+	// Restore from localStorage if available (client-side only)
+	const STORAGE_KEY = 'currentProject';
+	function loadInitialProject(): Project {
+		if (typeof localStorage !== 'undefined') {
+			try {
+				const stored = localStorage.getItem(STORAGE_KEY);
+				if (stored) {
+					const parsed = JSON.parse(stored) as Project;
+					if (parsed && parsed.id && parsed.id !== 'default') {
+						return parsed;
+					}
+				}
+			} catch {
+				// ignore parse errors
+			}
+		}
+		return DEFAULT_PROJECT;
+	}
+
+	export const currentProject: Writable<Project | null> = writable(loadInitialProject());
+
+	// Persist to localStorage on changes
+	if (typeof localStorage !== 'undefined') {
+		currentProject.subscribe((value) => {
+			try {
+				if (value && value.id !== 'default') {
+					localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+				} else {
+					localStorage.removeItem(STORAGE_KEY);
+				}
+			} catch {
+				// ignore storage errors
+			}
+		});
+	}
 	export const projects: Writable<Project[]> = writable([DEFAULT_PROJECT]);
 	export const projectLoading: Writable<boolean> = writable(false);
 	export const projectError: Writable<string | null> = writable(null);

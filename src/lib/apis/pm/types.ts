@@ -76,6 +76,7 @@ export interface ModuleEntry {
 	priority?: Priority;
 	currentVersionNumber?: string;
 	branchName?: string;
+	createdVersionNumber?: string; // version number at creation time (e.g. 'v1')
 	createdAt: number;
 	updatedAt: number;
 	version: number; // optimistic lock
@@ -400,12 +401,12 @@ export interface AgentIntent {
 }
 
 export interface AgentAction {
-	id: string;
-	type: 'pm.entry.create' | 'pm.entry.update' | 'pm.relation.create' | 'pm.version.create' | 'pm.parameter.extract';
-	label: string;
-	description: string;
-	payload: Record<string, unknown>;
-	status: 'pending' | 'applied' | 'dismissed';
+  id: string;
+  type: 'pm.entry.create' | 'pm.entry.update' | 'pm.entry.delete' | 'pm.entry.confirm' | 'pm.relation.create' | 'pm.version.create' | 'pm.parameter.extract';
+  label: string;
+  description: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'applied' | 'dismissed';
 }
 
 export interface AgentChatRequest {
@@ -556,6 +557,33 @@ export interface FlowchartEdge {
 	label?: string;
 	type?: 'default' | 'conditional';
 	style?: EdgeStyle;
+	sourcePoint?: 'top' | 'right' | 'bottom' | 'left';
+	targetPoint?: 'top' | 'right' | 'bottom' | 'left';
+	arrowStart?: boolean;
+	arrowEnd?: boolean;
+	lineType?: 'straight' | 'orthogonal' | 'curved';
+}
+
+export interface FlowchartText {
+	id: string;
+	position: { x: number; y: number };
+	text: string;
+	style?: {
+		fontSize?: number;
+		fontFamily?: string;
+		color?: string;
+		textAlign?: 'left' | 'center' | 'right';
+	};
+}
+
+export interface EditorState {
+	mode: 'select' | 'pan' | 'connect' | 'add';
+	selectedIds: string[];
+	isDragging: boolean;
+	isConnecting: boolean;
+	connectSource: { nodeId: string; point: string } | null;
+	zoom: number;
+	pan: { x: number; y: number };
 }
 
 export interface EdgeStyle {

@@ -9,6 +9,7 @@
 	});
 
 	import { onMount, tick, setContext, onDestroy } from 'svelte';
+	import { dev } from '$app/environment';
 	import {
 		config,
 		user,
@@ -89,7 +90,9 @@
 	};
 
 	// handle frontend updates (https://svelte.dev/docs/kit/configuration#version)
+	// dev 模式下跳过：HMR 已经处理更新，且 dev 下 updated.current 经常误报 true 导致频繁刷新
 	beforeNavigate(async ({ willUnload, to }) => {
+		if (dev) return;
 		if (updated.current && !willUnload && to?.url) {
 			await unregisterServiceWorkers();
 			location.href = to.url.href;
@@ -157,10 +160,15 @@
 			const deploymentId = res?.deployment_id ?? null;
 			const version = res?.version ?? null;
 
-			if (version !== null || deploymentId !== null) {
+			// dev 模式下跳过版本检查触发的全量刷新：
+			// 后端 uvicorn --reload 重启时 socket 会断开重连，VERSION/DEPLOYMENT_ID
+			// 偶发的瞬时不一致（如 package.json 读取失败回退到 '0.0.0'）会导致页面无意义刷新。
+			// HMR 已经处理了前端更新，dev 模式不需要这个机制。
+			if (!dev && (version !== null || deploymentId !== null)) {
 				// Only refresh if we already have a version/deploymentId set (not initial load)
 				const hasVersion = $WEBUI_VERSION !== null && $WEBUI_VERSION !== undefined;
-				const hasDeploymentId = $WEBUI_DEPLOYMENT_ID !== null && $WEBUI_DEPLOYMENT_ID !== undefined;
+				const hasDeploymentId =
+					$WEBUI_DEPLOYMENT_ID !== null && $WEBUI_DEPLOYMENT_ID !== undefined;
 
 				if (
 					(hasVersion && version !== $WEBUI_VERSION) ||

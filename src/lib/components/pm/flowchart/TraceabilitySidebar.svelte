@@ -23,9 +23,10 @@
 		projectId: string;
 		onClose: () => void;
 		onViewConfig?: () => void;
+		onBindTraceability?: (traceability: Traceability) => void;
 	}
 
-	let { nodeData, projectId, onClose, onViewConfig }: Props = $props();
+	let { nodeId, nodeData, projectId, onClose, onViewConfig, onBindTraceability }: Props = $props();
 
 	const entityTypeLabels: Record<string, string> = {
 		prd: 'PRD',

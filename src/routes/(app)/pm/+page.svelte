@@ -28,6 +28,13 @@
 		try {
 			const token = localStorage.token || '';
 			projects = await getProjects(token);
+			// Defensive dedup: filter out any duplicate project IDs
+			const seen = new Set<string>();
+			projects = projects.filter(p => {
+				if (seen.has(p.id)) return false;
+				seen.add(p.id);
+				return true;
+			});
 			// Load current version for each project
 			const versionEntries = await Promise.all(
 				projects.map(async (p) => {
@@ -64,8 +71,11 @@
 			toast.success('项目创建成功');
 		} catch (e: any) {
 			const msg = e?.message || '';
+			const statusCode = e?.status;
 			if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
 				toast.error('无法连接服务器，请检查后端是否已启动');
+			} else if (statusCode === 409) {
+				toast.error(`项目名 "${newProjectName}" 已存在，请使用其他名称`);
 			} else {
 				toast.error(msg || '创建失败');
 			}
@@ -96,7 +106,12 @@
 			await loadProjects();
 			toast.success('项目已更新');
 		} catch (e: any) {
-			toast.error(e.message || '更新失败');
+			const statusCode = e?.status;
+			if (statusCode === 409) {
+				toast.error(`项目名 "${editName}" 已被其他项目占用`);
+			} else {
+				toast.error(e.message || '更新失败');
+			}
 		} finally {
 			isSaving = false;
 		}

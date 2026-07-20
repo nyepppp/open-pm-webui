@@ -11,25 +11,15 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 
+	import { setCurrentProject } from '$lib/stores/pm/projectStore';
+	import { resetArchitectureStore } from '$lib/stores/pm/architectureStore';
+	import type { Project } from '$lib/apis/pm/types';
+
 	const i18n = getContext('i18n');
 
 	export let show = false;
 	export let onSelect: (data: any) => void = () => {};
 	export let onClose: () => void = () => {};
-
-	interface Project {
-		id: string;
-		name: string;
-		description?: string;
-		status: string;
-	}
-
-	interface Module {
-		id: string;
-		name: string;
-		module_type: string;
-		status: string;
-	}
 
 	interface Entry {
 		id: string;
@@ -42,11 +32,35 @@
 		version?: number;
 	}
 
+	interface ModuleType {
+		id: string;
+		name: string;
+		icon?: string;
+	}
+
+	const moduleTypes: ModuleType[] = [
+		{ id: 'prd', name: 'PRD 文档' },
+		{ id: 'requirement', name: '需求管理' },
+		{ id: 'parameter', name: '参数配置' },
+		{ id: 'testcase', name: '测试用例' },
+		{ id: 'risk', name: '风险分析' },
+		{ id: 'competitor', name: '竞品分析' },
+		{ id: 'roadmap', name: '产品路线图' },
+		{ id: 'meeting', name: '会议纪要' },
+		{ id: 'acceptance', name: '验收报告' },
+		{ id: 'faq', name: 'FAQ' },
+		{ id: 'product-architecture', name: '产品架构' },
+		{ id: 'prototype', name: '原型/UI设计' },
+		{ id: 'schedule', name: '项目排期' },
+		{ id: 'requirement-boundary', name: '需求边界' },
+		{ id: 'spec', name: 'SPEC 规范' },
+		{ id: 'flowchart', name: '流程图' }
+	];
+
 	let projects: Project[] = [];
-	let modules: Module[] = [];
 	let entries: Entry[] = [];
 	let selectedProject: Project | null = null;
-	let selectedModule: Module | null = null;
+	let selectedModuleType: string | null = null;
 	let searchQuery = '';
 	let loading = false;
 	let currentView: 'projects' | 'modules' | 'entries' = 'projects';
@@ -66,7 +80,8 @@
 			});
 			if (!response.ok) throw new Error('Failed to fetch projects');
 			const data = await response.json();
-			projects = data.projects || [];
+			// Handle both formats: { projects: [...] } and direct array [...]
+			projects = Array.isArray(data) ? data : (data.projects || []);
 		} catch (error) {
 			toast.error('Failed to fetch projects');
 			console.error(error);
@@ -75,31 +90,12 @@
 		}
 	}
 
-	async function fetchModules(projectId: string) {
-		loading = true;
-		try {
-			const response = await fetch(`${WEBUI_API_BASE_URL}/pm/projects/${projectId}/modules`, {
-				headers: {
-					Authorization: `Bearer ${localStorage.token}`
-				}
-			});
-			if (!response.ok) throw new Error('Failed to fetch modules');
-			const data = await response.json();
-			modules = data.modules || [];
-		} catch (error) {
-			toast.error('Failed to fetch modules');
-			console.error(error);
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function fetchEntries(projectId: string, moduleId?: string) {
+	async function fetchEntries(projectId: string, moduleType?: string) {
 		loading = true;
 		try {
 			let url = `${WEBUI_API_BASE_URL}/pm/projects/${projectId}/entries`;
-			if (moduleId) {
-				url += `?module_id=${moduleId}`;
+			if (moduleType) {
+				url += `?module_type=${moduleType}`;
 			}
 			const response = await fetch(url, {
 				headers: {
@@ -108,7 +104,8 @@
 			});
 			if (!response.ok) throw new Error('Failed to fetch entries');
 			const data = await response.json();
-			entries = data.entries || [];
+			// Handle both formats: { entries: [...] } and direct array [...]
+			entries = Array.isArray(data) ? data : (data.entries || []);
 		} catch (error) {
 			toast.error('Failed to fetch entries');
 			console.error(error);
@@ -117,24 +114,38 @@
 		}
 	}
 
-	function selectProject(project: Project) {
+	function selectProjectOnly(project: Project) {
 		selectedProject = project;
-		currentView = 'modules';
-		fetchModules(project.id);
+		// Update the global project store and clear stale architecture cache
+		setCurrentProject(project);
+		resetArchitectureStore();
+		onSelect({
+			projectId: project.id,
+			projectName: project.name,
+			type: 'project-only'
+		});
+		show = false;
 	}
 
-	function selectModule(module: Module) {
-		selectedModule = module;
+	function drillIntoProject(project: Project) {
+		selectedProject = project;
+		// Update the global project store
+		setCurrentProject(project);
+		currentView = 'modules';
+	}
+
+	function selectModuleType(moduleTypeId: string) {
+		selectedModuleType = moduleTypeId;
 		currentView = 'entries';
-		fetchEntries(selectedProject!.id, module.id);
+		if (selectedProject) {
+			fetchEntries(selectedProject.id, moduleTypeId);
+		}
 	}
 
 	function selectEntry(entry: Entry) {
 		const pmData = {
 			projectId: selectedProject?.id,
 			projectName: selectedProject?.name,
-			moduleId: selectedModule?.id,
-			moduleName: selectedModule?.name,
 			entryId: entry.id,
 			entryTitle: entry.title,
 			moduleType: entry.module_type,
@@ -149,12 +160,11 @@
 	function goBack() {
 		if (currentView === 'entries') {
 			currentView = 'modules';
-			selectedModule = null;
+			selectedModuleType = null;
 			entries = [];
 		} else if (currentView === 'modules') {
 			currentView = 'projects';
 			selectedProject = null;
-			modules = [];
 		}
 	}
 
@@ -163,17 +173,18 @@
 		onClose();
 	}
 
-	$: filteredProjects = projects.filter(p => 
+	$: filteredProjects = projects.filter(p =>
 		p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
 		p.description?.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
-	$: filteredModules = modules.filter(m =>
-		m.name.toLowerCase().includes(searchQuery.toLowerCase())
+	$: filteredEntries = entries.filter(e =>
+		(e.title || '').toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
-	$: filteredEntries = entries.filter(e =>
-		e.title.toLowerCase().includes(searchQuery.toLowerCase())
+	$: filteredModuleTypes = moduleTypes.filter(m =>
+		m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+		m.id.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 </script>
 
@@ -181,7 +192,7 @@
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
 		on:click={close}
 	>
-		<div 
+		<div
 			class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden"
 			on:click|stopPropagation
 			in:fly={{ y: 20, duration: 200 }}
@@ -220,10 +231,6 @@
 				<div class="px-4 py-2 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
 					<div class="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
 						<span class="font-medium">{selectedProject?.name}</span>
-						{#if selectedModule}
-							<ChevronRight className="size-4" />
-							<span class="font-medium">{selectedModule?.name}</span>
-						{/if}
 					</div>
 				</div>
 			{/if}
@@ -257,9 +264,12 @@
 					{:else}
 						<div class="space-y-2">
 							{#each filteredProjects as project}
+							<div
+								class="w-full flex items-center gap-1 p-1.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+							>
 								<button
-									on:click={() => selectProject(project)}
-									class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
+									on:click={() => selectProjectOnly(project)}
+									class="flex-1 flex items-center gap-3 p-1.5 rounded-lg text-left"
 								>
 									<div class="shrink-0">
 										<Folder className="size-8 text-blue-500" />
@@ -274,21 +284,29 @@
 											</div>
 										{/if}
 									</div>
-									<ChevronRight className="size-5 text-gray-400" />
 								</button>
-							{/each}
+								<button
+									on:click|stopPropagation={() => drillIntoProject(project)}
+									class="shrink-0 p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+									aria-label="查看模块"
+									title="查看模块"
+								>
+									<ChevronRight className="size-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+								</button>
+							</div>
+						{/each}
 						</div>
 					{/if}
 				{:else if currentView === 'modules'}
-					{#if filteredModules.length === 0}
+					{#if filteredModuleTypes.length === 0}
 						<div class="text-center py-8 text-gray-500">
 							暂无模块
 						</div>
 					{:else}
 						<div class="space-y-2">
-							{#each filteredModules as module}
+							{#each filteredModuleTypes as moduleType}
 								<button
-									on:click={() => selectModule(module)}
+									on:click={() => selectModuleType(moduleType.id)}
 									class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
 								>
 									<div class="shrink-0">
@@ -296,10 +314,10 @@
 									</div>
 									<div class="flex-1 min-w-0">
 										<div class="font-medium text-gray-900 dark:text-white truncate">
-											{module.name}
+											{moduleType.name}
 										</div>
-										<div class="text-sm text-gray-500">
-											{module.module_type}
+										<div class="text-sm text-gray-500 truncate">
+											{moduleType.id}
 										</div>
 									</div>
 									<ChevronRight className="size-5 text-gray-400" />
