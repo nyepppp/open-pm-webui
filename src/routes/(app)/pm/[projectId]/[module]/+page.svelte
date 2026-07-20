@@ -4,7 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
-	import { getEntries, createEntry, deleteEntry, updateEntry, getEntry } from '$lib/apis/pm/index';
+	import { getEntries, createEntry, deleteEntry, updateEntry, getEntry, exportModule } from '$lib/apis/pm/index';
 	import { createCalendarEvent, getCalendars, deleteCalendarEvent, createCalendar } from '$lib/apis/calendar';
 	import { currentVersion, versions as versionList } from '$lib/stores/pm/versionStore';
 	import { createNewNote } from '$lib/apis/notes/index';
@@ -14,8 +14,8 @@
 	import PMVersionComparePanel from '$lib/components/pm/PMVersionComparePanel.svelte';
 	import PMVersionBranchDialog from '$lib/components/pm/PMVersionBranchDialog.svelte';
 	import PMVersionMergePanel from '$lib/components/pm/PMVersionMergePanel.svelte';
-	import PMSaveVersionDialog from '$lib/components/pm/PMSaveVersionDialog.svelte';
 	import { createEntryVersion } from '$lib/apis/pm/version';
+	import { PMApiError } from '$lib/apis/pm/index';
 	import { marked } from 'marked';
 	import type { ModuleType, ModuleStatus, Priority, PRDSection, MindMapNode, ModuleEntry } from '$lib/apis/pm/types';
 	import PMMindMap from '$lib/components/pm/PMMindMap.svelte';
@@ -34,14 +34,12 @@
 	import PMFormSelect from '$lib/components/pm/PMFormSelect.svelte';
 	import PMFormSection from '$lib/components/pm/PMFormSection.svelte';
 	import PMFormToggleGroup from '$lib/components/pm/PMFormToggleGroup.svelte';
+	import PMImportExport from '$lib/components/pm/PMImportExport.svelte';
+	import PMExportDialog from '$lib/components/pm/PMExportDialog.svelte';
+	import GanttChart from '$lib/components/pm/GanttChart.svelte';
 
 	let projectId = $derived($page.params.projectId);
 	let moduleType = $derived($page.params.module as ModuleType);
-
-	// Redirect old parameter/product-architecture routes to new unified architecture page
-	if (moduleType === 'parameter' || moduleType === 'product-architecture') {
-		goto(`/pm/${projectId}/architecture`);
-	}
 
 	type EditorType = 'rich' | 'table' | 'form' | 'mindmap' | 'flowchart' | 'competitor';
 	interface ModuleConf { name: string; editorType: EditorType; tableColumns?: { key: string; label: string; width?: string }[]; formFields?: { key: string; label: string; type: 'text' | 'textarea' | 'select' }[] }
@@ -136,6 +134,10 @@
 
 	let config = $derived(moduleConfig[moduleType] || { name: '未知模块', editorType: 'rich' as EditorType });
 	let entries = $state<ModuleEntry[]>([]);
+	// 稳定化导出对话框的 entries 引用：避免每次渲染都产生新数组触发子组件 $effect 重置
+	let exportDialogEntries = $derived(
+		entries.map((e) => ({ id: e.id, title: e.title || '', type: (e.data as any)?.type }))
+	);
 	let isLoading = $state(true);
 	let loadError = $state('');
 	let loadRelatedError = $state('');
@@ -174,6 +176,7 @@
 	let newUserRole = $state('');
 	let newExpectedBenefit = $state('');
 	let newRelatedModules = $state('');
+	let newDueDate = $state('');
 	// Roadmap-specific
 	let newNodeType = $state<'milestone' | 'feature' | 'release'>('feature');
 	let newNodeStatus = $state<'planned' | 'in_progress' | 'completed' | 'delayed'>('planned');
@@ -206,6 +209,8 @@
 	// Testcase related entries for dropdowns
 	let requirementEntries = $state<any[]>([]);
 	let parameterEntries = $state<any[]>([]);
+	// 甘特图跨模块聚合：schedule/roadmap 视图下额外拉取 risk/meeting/requirement/对方模块
+	let crossModuleEntries = $state<any[]>([]);
 	let prdEntries = $state<any[]>([]);
 	let flowchartEntries = $state<any[]>([]);
 
@@ -266,6 +271,25 @@
 				requirementEntries = await getEntries(token, projectId, 'requirement');
 				parameterEntries = await getEntries(token, projectId, 'parameter');
 			}
+			// 甘特图跨模块聚合：schedule/roadmap 视图下额外拉取 risk/meeting/requirement/对方模块
+			// 让两个甘特图都能展示全项目时间线，而非模块孤岛
+			if (moduleType === 'schedule' || moduleType === 'roadmap') {
+				const otherGanttModule = moduleType === 'schedule' ? 'roadmap' : 'schedule';
+				const [riskEntries, meetingEntries, reqEntries, otherEntries] = await Promise.all([
+					getEntries(token, projectId, 'risk'),
+					getEntries(token, projectId, 'meeting'),
+					getEntries(token, projectId, 'requirement'),
+					getEntries(token, projectId, otherGanttModule),
+				]);
+				crossModuleEntries = [
+					...riskEntries.map((e: any) => ({ ...e, _source: 'risk' })),
+					...meetingEntries.map((e: any) => ({ ...e, _source: 'meeting' })),
+					...reqEntries.map((e: any) => ({ ...e, _source: 'requirement' })),
+					...otherEntries.map((e: any) => ({ ...e, _source: otherGanttModule })),
+				];
+			} else {
+				crossModuleEntries = [];
+			}
 		} catch (e: any) {
 			console.warn('[PM] loadRelatedEntries failed:', e?.message);
 			loadRelatedError = e?.message || '加载关联数据失败';
@@ -278,7 +302,8 @@
 		try {
 			const token = localStorage.token || '';
 			if (!token) { loadError = '未登录，请先登录'; entries = []; isLoading = false; return; }
-			entries = await getEntries(token, projectId, moduleType);
+			const currentVer = $currentVersion;
+			entries = await getEntries(token, projectId, moduleType, currentVer?.id);
 		} catch (e: any) {
 			entries = [];
 			const msg = e?.message || e?.detail || '加载失败，请检查网络或项目权限';
@@ -290,7 +315,79 @@
 	}
 	let _loadAbort: AbortController | null = null;
 	onMount(() => { loadEntries(); loadRelatedEntries(); });
-	$effect(() => { moduleType; showNewForm = false; newFormData = {}; if (_loadAbort) { _loadAbort.abort(); _loadAbort = null; } loadEntries(); loadRelatedEntries(); });
+	$effect(() => { 
+		moduleType; 
+		showNewForm = false; 
+		newFormData = {}; 
+		if (_loadAbort) { _loadAbort.abort(); _loadAbort = null; } 
+		loadEntries(); 
+		loadRelatedEntries(); 
+	});
+	// Reload entries when global version changes
+	$effect(() => {
+		const versionId = $currentVersion?.id;
+		if (versionId) {
+			loadEntries();
+		}
+	});
+
+	// 直接调后端 /pm/projects/{id}/modules/{type}/export 端点下载文件。
+	// 复用已验证正确的 _entry_to_row 扁平化逻辑，避免客户端 flattenEntry 丢失字段。
+	let isExporting = $state(false);
+	// 导出对话框状态
+	let showExportDialog = $state(false);
+	// 当前模块的默认导出列（来自 moduleConfig.tableColumns；非 table 模块为空数组）
+	let exportDefaultColumns = $derived.by(() => {
+		const conf = moduleConfig[moduleType as string];
+		if (conf && Array.isArray(conf.tableColumns)) {
+			return conf.tableColumns.map(c => ({ key: c.key, label: c.label }));
+		}
+		return [];
+	});
+	// 当前模块的显示名
+	let exportModuleDisplayName = $derived(moduleConfig[moduleType as string]?.name || moduleType);
+
+	function handleExport() {
+		// 改为打开对话框，让用户选择格式与列
+		showExportDialog = true;
+	}
+
+	async function handleExportFromDialog(params: { format: 'xlsx' | 'csv' | 'json' | 'markdown' | 'docx'; columns: Array<{ key: string; label: string }> | undefined; entryIds?: string[] }) {
+		if (isExporting) return;
+		isExporting = true;
+		try {
+			const token = localStorage.token || '';
+			if (!token) {
+				toast.error('未登录');
+				return;
+			}
+			const blob = await exportModule(token, projectId, moduleType, params.format, $currentVersion?.id, params.columns, params.entryIds);
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			// 文件扩展名映射
+			const extMap: Record<string, string> = { xlsx: 'xlsx', csv: 'csv', json: 'json', markdown: 'md', docx: 'docx' };
+			const ext = extMap[params.format] || 'bin';
+			a.download = `${moduleType}-${Date.now()}.${ext}`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			toast.success(`已导出为 ${params.format.toUpperCase()} 格式`);
+		} catch (e: any) {
+			// 打印完整错误到控制台，便于诊断是哪个 fetch 失败 / URL 是否过长
+			console.error('[PM Export] handleExportFromDialog failed:', e, {
+				moduleType,
+				format: params.format,
+				versionId: $currentVersion?.id,
+				columnsCount: params.columns?.length,
+				entryIdsCount: params.entryIds?.length
+			});
+			toast.error(e.message || '导出失败');
+		} finally {
+			isExporting = false;
+		}
+	}
 
 	async function handleCreate() {
 		if (!newTitle.trim()) return;
@@ -302,9 +399,9 @@
 			} else if (moduleType === 'testcase') {
 				data.data = { caseType: newCaseType, scenario: newScenario, precondition: newPrecondition, steps: newSteps, inputData: newInputData, expectedResult: newExpectedResult, requirementId: newRequirementId, parameterId: newParameterId, featureName: newFeatureName, moduleName: newTestCaseModule };
 			} else if (moduleType === 'requirement') {
-				data.data = { source: newSource, category: newCategory, description: newDescription, tags: newTags.split(',').map(t => t.trim()).filter(Boolean), userRole: newUserRole, expectedBenefit: newExpectedBenefit, relatedModules: newRelatedModules.split(',').map(t => t.trim()).filter(Boolean) };
-				data.content = newDescription || undefined;
-			} else if (moduleType === 'roadmap') {
+			data.data = { source: newSource, category: newCategory, description: newDescription, tags: newTags.split(',').map(t => t.trim()).filter(Boolean), userRole: newUserRole, expectedBenefit: newExpectedBenefit, relatedModules: newRelatedModules.split(',').map(t => t.trim()).filter(Boolean), dueDate: newDueDate || undefined };
+			data.content = newDescription || undefined;
+		} else if (moduleType === 'roadmap') {
 				data.data = { nodeType: newNodeType, nodeStatus: newNodeStatus, startDate: newStartDate, endDate: newEndDate, dependencies: newDependencies, versionId: newVersionId };
 			} else if (moduleType === 'prototype') {
 				data.data = { protoType: newProtoType };
@@ -535,12 +632,67 @@
 	// Roadmap view toggle
 	let roadmapView = $state<'table' | 'gantt'>('table');
 	let ganttTimeScale = $state<'day' | 'week' | 'month'>('week');
-	let ganttViewOffset = $state(0);
+	// GanttChart 组件引用，用于调用 centerOnToday（通过 bind:this）
+	let ganttChartRef: any;
+
+	// 甘特图聚合条目（跨模块：当前模块 + 风险 + 会议 + 需求 + 对方甘特模块）
+	// 用 $derived.by 自动追踪 filteredEntries / crossModuleEntries / moduleType 依赖，
+	// 仅在依赖变化时重算，避免模板 IIFE 每次块重渲染都生成新数组引用
+	let ganttEntries = $derived.by(() => {
+		const result: any[] = [];
+		// 当前模块条目（schedule/roadmap 自身）
+		// D3: 放宽为任一日期存在即入图，单日期时用同一日期兜底 _sd/_ed
+		for (const e of filteredEntries) {
+			const sd = getEntryData(e, 'startDate');
+			const ed = getEntryData(e, 'endDate');
+			if (sd || ed) {
+				const d = sd || ed;
+				result.push({ ...e, _source: moduleType, _sd: sd || d, _ed: ed || d });
+			}
+		}
+		// 跨模块聚合（risk/meeting/requirement/对方甘特模块）
+		for (const e of crossModuleEntries) {
+			const src = e._source;
+			if (src === 'risk') {
+				const d = getEntryData(e, 'deadline');
+				if (d) result.push({ ...e, _source: src, _sd: d, _ed: d });
+			} else if (src === 'meeting') {
+				const d = getEntryData(e, 'meetingDate');
+				if (d) result.push({ ...e, _source: src, _sd: d, _ed: d });
+			} else if (src === 'requirement') {
+				const d = getEntryData(e, 'dueDate');
+				if (d) result.push({ ...e, _source: src, _sd: d, _ed: d });
+			} else if (src === 'schedule' || src === 'roadmap') {
+				const sd = getEntryData(e, 'startDate');
+				const ed = getEntryData(e, 'endDate');
+				if (sd || ed) {
+					const d = sd || ed;
+					result.push({ ...e, _source: src, _sd: sd || d, _ed: ed || d });
+				}
+			}
+		}
+		return result;
+	});
 
 	const nodeTypeMap: Record<string, { l: string; c: string }> = {
 		milestone: { l: '里程碑', c: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
 		feature: { l: '功能', c: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
 		release: { l: '发布', c: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' }
+	};
+	// 甘特图跨模块来源颜色 / 标签映射
+	const sourceColorMap: Record<string, string> = {
+		schedule: 'bg-blue-500',
+		roadmap: 'bg-purple-500',
+		risk: 'bg-red-500',
+		meeting: 'bg-amber-500',
+		requirement: 'bg-emerald-500'
+	};
+	const sourceLabelMap: Record<string, string> = {
+		schedule: '排期',
+		roadmap: '路线图',
+		risk: '风险',
+		meeting: '会议',
+		requirement: '需求'
 	};
 	const nodeStatusMap: Record<string, { l: string; c: string }> = {
 		planned: { l: '计划中', c: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' },
@@ -573,16 +725,40 @@
 	let editSource = $state<string>('manual');
 	let editCategory = $state('');
 	let editVersionId = $state<string>('');
+	// requirement 专属字段（C2 新增，避免编辑抽屉保存时丢失）
+	let editTags = $state<string[]>([]);
+	let editUserRole = $state<string>('');
+	let editExpectedBenefit = $state<string>('');
+	let editRelatedModules = $state<string[]>([]);
+	let editDueDate = $state<string>('');
+	// requirement-boundary 专属字段
+	let editFunction = $state<string>('');
+	let editUsage = $state<string>('');
+	let editExpectedEffect = $state<string>('');
+	let editRelatedRequirements = $state<string[]>([]);
+	let editRelatedParameters = $state<string[]>([]);
 
 	function openEditDrawer(entry: any) {
 		editDrawerEntry = entry;
 		editTitle = entry.title || '';
-		editContent = entry.content || '';
 		editPriority = entry.priority || 'p2';
 		editStatus = entry.status || 'draft';
 		editSource = getEntryData(entry, 'source') || 'manual';
 		editCategory = getEntryData(entry, 'category') || '';
 		editVersionId = getEntryData(entry, 'versionId') || entry.versionId || '';
+		// requirement 字段（C3：优先从 data.description 取，与表格列对齐）
+		editTags = getEntryData(entry, 'tags') || [];
+		editUserRole = getEntryData(entry, 'userRole') || '';
+		editExpectedBenefit = getEntryData(entry, 'expectedBenefit') || '';
+		editRelatedModules = getEntryData(entry, 'relatedModules') || [];
+		editDueDate = getEntryData(entry, 'dueDate') || '';
+		editContent = getEntryData(entry, 'description') || entry.content || '';
+		// requirement-boundary 字段
+		editFunction = getEntryData(entry, 'function') || '';
+		editUsage = getEntryData(entry, 'usage') || '';
+		editExpectedEffect = getEntryData(entry, 'expectedEffect') || '';
+		editRelatedRequirements = getEntryData(entry, 'relatedRequirements') || [];
+		editRelatedParameters = getEntryData(entry, 'relatedParameters') || [];
 		showEditDrawer = true;
 	}
 
@@ -597,16 +773,37 @@
 				priority: editPriority
 			};
 			if (moduleType === 'requirement') {
-				data.data = { source: editSource, category: editCategory };
-			} else if (moduleType === 'roadmap') {
-				data.data = { ...(editDrawerEntry.data || {} ) };
-			} else if (moduleType === 'testcase') {
-				data.data = { ...(editDrawerEntry.data || {} ) };
-			} else if (moduleType === 'parameter') {
-				data.data = { ...(editDrawerEntry.data || {} ) };
-			} else if (moduleType === 'prototype' || moduleType === 'schedule' || moduleType === 'requirement-boundary') {
-				data.data = { ...(editDrawerEntry.data || {} ) };
-			}
+			// C1 修复：spread 保留所有字段 + 显式写入 8 个字段（不再丢失 tags/userRole/expectedBenefit/relatedModules/dueDate/description）
+			data.data = {
+				...(editDrawerEntry.data || {}),
+				source: editSource,
+				category: editCategory,
+				description: editContent || undefined,
+				tags: editTags,
+				userRole: editUserRole,
+				expectedBenefit: editExpectedBenefit,
+				relatedModules: editRelatedModules,
+				dueDate: editDueDate || undefined
+			};
+		} else if (moduleType === 'roadmap') {
+			data.data = { ...(editDrawerEntry.data || {} ) };
+		} else if (moduleType === 'testcase') {
+			data.data = { ...(editDrawerEntry.data || {} ) };
+		} else if (moduleType === 'parameter') {
+			data.data = { ...(editDrawerEntry.data || {} ) };
+		} else if (moduleType === 'requirement-boundary') {
+			// C5：requirement-boundary 显式写入 5 个字段（spread 兜底保留其他）
+			data.data = {
+				...(editDrawerEntry.data || {}),
+				function: editFunction,
+				usage: editUsage,
+				expectedEffect: editExpectedEffect,
+				relatedRequirements: editRelatedRequirements,
+				relatedParameters: editRelatedParameters
+			};
+		} else if (moduleType === 'prototype' || moduleType === 'schedule') {
+			data.data = { ...(editDrawerEntry.data || {} ) };
+		}
 			// Preserve versionId from data if present
 			const drawerVersionId = editDrawerEntry.data?.versionId || editDrawerEntry.versionId;
 			if (drawerVersionId) {
@@ -616,10 +813,21 @@
 				}
 			}
 			await updateEntry(token, editDrawerEntry.id, data);
+			// Auto-create new version snapshot (best-effort; silent fail)
+			try {
+				const currentVer = $currentVersion;
+				await createEntryVersion(projectId, editDrawerEntry.id, {
+					change_summary: `编辑: ${editTitle || editDrawerEntry.title || ''}`,
+					branch_name: editDrawerEntry.branchName || 'main',
+					project_version_id: currentVer?.id
+				});
+			} catch (versionErr: any) {
+				console.warn('[PM] auto-version creation failed (drawer):', versionErr?.message);
+			}
 			showEditDrawer = false;
 			editDrawerEntry = null;
 			await loadEntries();
-			toast.success('更新成功');
+			toast.success('已保存并创建新版本');
 		} catch (e: any) {
 			toast.error(e.message || '更新失败');
 		}
@@ -639,7 +847,6 @@
 	let autoSaveTimer: ReturnType<typeof setTimeout> | null = $state(null);
 	let saveStatus = $state<'saved' | 'unsaved' | 'auto-saving'>('saved');
 	let lastAutoSaveTime = $state<number>(0);
-	let showSaveVersionDialog = $state(false);
 	
 	// Calendar sync dialog state
 	let showCalendarSyncDialog = $state(false);
@@ -716,8 +923,8 @@
 		}, AUTO_SAVE_DELAY);
 	}
 
-	async function saveEntryContentOnly() {
-		if (!editingEntryId) return;
+	async function saveEntryContentOnly(): Promise<boolean> {
+		if (!editingEntryId) return false;
 		try {
 			const token = localStorage.token || '';
 			if (moduleType === 'prd') {
@@ -743,8 +950,10 @@
 					versionId: autoVid
 				});
 			}
+			return true;
 		} catch (e: any) {
 			console.warn('[PM] auto-save failed:', e?.message);
+			return false;
 		}
 	}
 
@@ -794,8 +1003,9 @@
 		if (mdFileInput) mdFileInput.value = '';
 	}
 
-	async function saveEntryDoc() {
-		if (!editingEntryId) return;
+	async function saveEntryDoc(): Promise<boolean> {
+		// 返回 true 表示内容保存成功，false 表示失败（让调用方决定是否继续创建版本）
+		if (!editingEntryId) return false;
 		try {
 			const token = localStorage.token || '';
 			if (moduleType === 'prd') {
@@ -845,38 +1055,102 @@
 				});
 			}
 			toast.success('保存成功');
-			await loadEntries();
-			showSaveVersionDialog = true;
-		} catch (e: any) {
-			toast.error(e.message || '保存失败');
-		}
+		await loadEntries();
+		return true;
+	} catch (e: any) {
+		// D29: 内容保存失败时，不再尝试创建版本（避免误导用户的「内容已保存」toast）
+		console.error('[PM] saveEntryDoc failed:', {
+			entryId: editingEntryId,
+			projectId,
+			error: e,
+			message: e?.message,
+			errorType: e?.constructor?.name,
+		});
+		toast.error(e.message || '保存失败');
+		return false;
+	}
+}
+
+async function handleSaveWithVersion() {
+	// 1. 先保存内容；失败则不再尝试创建版本（D29）
+	const saved = await saveEntryDoc();
+	if (!saved || !editingEntryId) return;
+
+	// D7: 检查 entryId 是否虚拟 ID（未持久化的前端临时 ID）
+	if (/^(feat-|param-|mod-|virt-)/.test(editingEntryId)) {
+		console.error('[PM] version creation blocked: virtual entryId', editingEntryId);
+		toast.warning('条目尚未持久化，内容已保存，请刷新页面后重试创建版本');
+		return;
 	}
 
-	async function saveAsNewVersion() {
-		if (!editingEntryId) { toast.error('没有正在编辑的文档'); return; }
-		try {
-			// First save the current content
-			await saveEntryContentOnly();
-			
-			const currentVer = $currentVersion;
-			console.log('[PM] Creating new version for entry', editingEntryId, 'projectVersion:', currentVer?.id);
-			await createEntryVersion(projectId, editingEntryId, {
-				change_summary: `保存: ${editingDocTitle}`,
-				branch_name: editingEntry?.branchName || 'main',
-				project_version_id: currentVer?.id
+	// D41: 显式校验 currentVersion —— Bug 1 根因之一是 currentVer 为 null 时 project_version_id 为 undefined
+	const currentVer = $currentVersion;
+	if (!currentVer?.id) {
+		console.error('[PM] version creation blocked: no current project version', { projectId });
+		toast.error('当前项目无激活版本，请先到「版本管理」页面创建版本，再回来保存版本');
+		return;
+	}
+
+	// 2. 尝试创建版本（失败则降级 — D13）
+	const versionPayload = {
+		change_summary: `保存: ${editingDocTitle || editingEntry?.title || ''}`,
+		branch_name: editingEntry?.branchName || 'main',
+		project_version_id: currentVer.id
+	};
+	const versionUrl = `/pm/projects/${projectId}/entries/${editingEntryId}/versions`;
+	try {
+		const newVersion = await createEntryVersion(projectId, editingEntryId, versionPayload);
+		toast.success(`新版本 ${newVersion?.version_number || ''} 已创建`);
+		await loadEntries();
+	} catch (e: any) {
+		// K2a: [Bug1-Diag] 标签 + PMApiError 结构化错误透传
+		// v7 的 K1a 让 create() 抛 PMApiError，这里 catch 能直接读 e.status / e.detail / e.url
+		// 不再依赖正则 /\((\d{3})\)/ 从 e.message 提取 HTTP 状态码
+		const isPMApiErr = e instanceof PMApiError;
+		const errMsg = e?.message || '';
+		const isNetworkError = e instanceof TypeError || /无法连接到后端/.test(errMsg);
+		// K2a: PMApiError 时直接用 e.status，否则 fallback 到正则提取
+		const httpMatch = errMsg.match(/\((\d{3})\)/);
+		const httpStatus = isPMApiErr ? e.status : (httpMatch ? parseInt(httpMatch[1], 10) : null);
+		console.error('[Bug1-Diag] version creation failed:', {
+			entryId: editingEntryId,
+			projectId,
+			url: versionUrl,
+			payload: versionPayload,
+			error: e,
+			message: errMsg,
+			errorType: e?.constructor?.name,
+			isPMApiErr,
+			isNetworkError,
+			httpStatus,
+			detail: isPMApiErr ? e.detail : null,
+			isHttp4xx: httpStatus !== null && httpStatus >= 400 && httpStatus < 500,
+			isHttp5xx: httpStatus !== null && httpStatus >= 500,
+		});
+		if (isPMApiErr) {
+			console.error('[Bug1-Diag] PMApiError detail:', {
+				status: e.status,
+				detail: e.detail,
+				url: e.url,
 			});
-			toast.success('新版本已创建');
-			await loadEntries();
-		} catch (e: any) {
-			console.error('[PM] version creation failed:', e);
-			const msg = e?.message || '创建新版本失败';
-			if (msg.includes('404') || msg.includes('405')) {
-				toast.error('版本功能暂不可用，请确认后端已升级到支持版本管理的版本');
-			} else {
-				toast.error(msg);
-			}
+		}
+		// D13: 降级保存 — 内容已保存，仅版本未创建
+		// D29: toast 文案增加诊断 hint，让用户知道如何自查
+		// D41: 提示用户点「保存版本」按钮重试
+		// D54: toast 文案细化 —— 区分网络错 / 4xx / 5xx，让用户一眼看出根因
+		if (isNetworkError) {
+			toast.warning('版本未创建（无法连接后端），内容已保存。请检查后端是否在 8080 端口启动，或查看浏览器控制台 [pmFetch] 日志定位根因。恢复后点「保存版本」按钮重试');
+		} else if (httpStatus === 404 || /404|not found/i.test(errMsg)) {
+			toast.warning('版本功能暂不可用（端点 404），内容已保存。请确认后端已升级支持版本管理');
+		} else if (httpStatus !== null && httpStatus >= 500) {
+			toast.warning(`版本未创建（后端 ${httpStatus} 错误），内容已保存。请查看后端日志定位根因，恢复后点「保存版本」按钮重试`);
+		} else if (httpStatus !== null && httpStatus >= 400) {
+			toast.warning(`版本未创建（HTTP ${httpStatus}），内容已保存。${errMsg}。可点「保存版本」按钮重试`);
+		} else {
+			toast.warning(`版本未创建: ${errMsg}，内容已保存。可点「保存版本」按钮重试`);
 		}
 	}
+}
 
 	// Sync single entry to calendar
 	async function syncSingleToCalendar(entry: any) {
@@ -1027,6 +1301,10 @@
 		calendarSyncEntry = null;
 	}
 
+	// Import/Export dialog state
+	let showImportExport = $state(false);
+	let importExportMode = $state<'import' | 'export'>('export');
+
 	// Traceability side panel
 	let showTracePanel = $state(false);
 	let traceEntry = $state<any>(null);
@@ -1170,13 +1448,18 @@
 						</div>
 						{#if roadmapView === 'gantt'}
 							<div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-								<button class="px-2 py-1 text-xs rounded-md transition {ganttTimeScale === 'day' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { ganttTimeScale = 'day'; ganttViewOffset = 0; }}>天</button>
-								<button class="px-2 py-1 text-xs rounded-md transition {ganttTimeScale === 'week' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { ganttTimeScale = 'week'; ganttViewOffset = 0; }}>周</button>
-								<button class="px-2 py-1 text-xs rounded-md transition {ganttTimeScale === 'month' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { ganttTimeScale = 'month'; ganttViewOffset = 0; }}>月</button>
+								<button class="px-2 py-1 text-xs rounded-md transition {ganttTimeScale === 'day' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { ganttTimeScale = 'day'; }}>天</button>
+								<button class="px-2 py-1 text-xs rounded-md transition {ganttTimeScale === 'week' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { ganttTimeScale = 'week'; }}>周</button>
+								<button class="px-2 py-1 text-xs rounded-md transition {ganttTimeScale === 'month' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500'}" onclick={() => { ganttTimeScale = 'month'; }}>月</button>
 							</div>
-							<button class="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition" onclick={() => { ganttViewOffset -= 1; }}>◀</button>
-							<button class="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition" onclick={() => { ganttViewOffset = 0; }}>今天</button>
-							<button class="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition" onclick={() => { ganttViewOffset += 1; }}>▶</button>
+							<button class="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition" onclick={() => { if (ganttEntries.length === 0) { toast.info('暂无甘特图数据'); return; } ganttChartRef?.centerOnToday(); }}>今天</button>
+							<button class="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition" onclick={() => { if (ganttEntries.length === 0) { toast.info('暂无甘特图数据'); return; } ganttChartRef?.scrollToEnd(); }} title="跳到最后一个任务">末尾</button>
+							<input
+								type="date"
+								class="px-1.5 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+								onchange={(e) => { const v = (e.target as HTMLInputElement).value; if (!v) return; if (ganttEntries.length === 0) { toast.info('暂无甘特图数据'); return; } ganttChartRef?.scrollToDate(v); }}
+								title="跳转到指定日期"
+							/>
 						{/if}
 					</div>
 				{/if}
@@ -1196,6 +1479,14 @@
 							<div class="ml-1 text-xs">新建</div>
 						</button>
 					{/if}
+					<button class="px-2 py-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 transition font-medium text-sm flex items-center hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed" onclick={handleExport} disabled={isExporting}>
+					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+					<div class="ml-1 text-xs">{isExporting ? '导出中...' : '导出'}</div>
+				</button>
+					<button class="px-2 py-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 transition font-medium text-sm flex items-center hover:bg-gray-50 dark:hover:bg-gray-800" onclick={() => { showImportExport = true; importExportMode = 'import'; }}>
+						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+						<div class="ml-1 text-xs">导入</div>
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -1469,7 +1760,8 @@
 						<PMFormInput label="" placeholder="用户角色" bind:value={newUserRole} />
 						<PMFormTextarea label="" placeholder="预期收益" rows="2" bind:value={newExpectedBenefit} />
 						<PMFormInput label="" placeholder="关联模块（逗号分隔）" bind:value={newRelatedModules} />
-					{:else if moduleType === 'roadmap'}
+					<PMFormInput label="" placeholder="期望完成日期（YYYY-MM-DD）" type="date" bind:value={newDueDate} />
+				{:else if moduleType === 'roadmap'}
 						<div class="flex gap-2">
 							<PMFormSelect
 								options={['milestone', 'feature', 'release'].map((nt) => ({ value: nt, label: nodeTypeMap[nt].l }))}
@@ -1514,109 +1806,13 @@
 				{#if !query}<button class="mt-3 px-4 py-2 text-sm bg-black text-white dark:bg-white dark:text-black rounded-xl transition" onclick={async () => { if (moduleType === 'spec') { handleSpecCreate(); } else { showNewForm = true; await tick(); document.getElementById('new-form-container')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } }}>创建第一个条目</button>{/if}
 			</div>
 		{:else if isTableView && (moduleType === 'roadmap' || moduleType === 'schedule') && roadmapView === 'gantt'}
-			{#key filteredEntries}
-			{@const ganttEntries = filteredEntries.filter((e: any) => getEntryData(e, 'startDate') && getEntryData(e, 'endDate'))}
-			{#if ganttEntries.length === 0}
-				<div class="py-8 text-center text-sm text-gray-400">暂无带日期的节点，无法展示甘特图</div>
-			{:else}
-				{@const allDates = ganttEntries.flatMap((e: any) => [new Date(getEntryData(e, 'startDate')).getTime(), new Date(getEntryData(e, 'endDate')).getTime()])}
-				{@const dataMinTs = Math.min(...allDates)}
-				{@const dataMaxTs = Math.max(...allDates)}
-				{@const scaleMs = ganttTimeScale === 'day' ? 86400000 : ganttTimeScale === 'week' ? 7 * 86400000 : 30 * 86400000}
-				{@const viewRangeMs = scaleMs * (ganttTimeScale === 'day' ? 31 : ganttTimeScale === 'week' ? 12 : 12)}
-				{@const nowTs = Date.now()}
-				{@const viewCenterTs = nowTs + ganttViewOffset * viewRangeMs}
-				{@const minTs = Math.min(dataMinTs, viewCenterTs - viewRangeMs / 2)}
-				{@const maxTs = Math.max(dataMaxTs, viewCenterTs + viewRangeMs / 2)}
-				{@const totalMs = maxTs - minTs || 86400000}
-				{@const todayLeft = ((nowTs - minTs) / totalMs) * 100}
-				<div class="px-3 pb-3 overflow-x-auto relative" style="min-width: 700px;">
-					<!-- Column headers based on time scale -->
-					<div class="flex border-b border-gray-200 dark:border-gray-700 mb-1 ml-48 relative h-7">
-						{#each (() => {
-							const cols: { label: string; left: number; width: number }[] = [];
-							const d = new Date(minTs);
-							if (ganttTimeScale === 'month') {
-								d.setDate(1);
-								while (d.getTime() <= maxTs) {
-									const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
-									const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-									const left = ((mStart.getTime() - minTs) / totalMs) * 100;
-									const right = ((Math.min(mEnd.getTime(), maxTs) - minTs) / totalMs) * 100;
-									cols.push({ label: `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}`, left, width: Math.max(right - left, 5) });
-									d.setMonth(d.getMonth() + 1);
-								}
-							} else if (ganttTimeScale === 'week') {
-								d.setDate(d.getDate() - d.getDay() + 1);
-								while (d.getTime() <= maxTs) {
-									const wStart = d.getTime();
-									const wEnd = wStart + 7 * 86400000;
-									const left = ((wStart - minTs) / totalMs) * 100;
-									const right = ((Math.min(wEnd, maxTs) - minTs) / totalMs) * 100;
-									cols.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, left, width: Math.max(right - left, 3) });
-									d.setDate(d.getDate() + 7);
-								}
-							} else {
-								while (d.getTime() <= maxTs) {
-									const dStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-									const dEnd = dStart + 86400000;
-									const left = ((dStart - minTs) / totalMs) * 100;
-									const right = ((Math.min(dEnd, maxTs) - minTs) / totalMs) * 100;
-									cols.push({ label: d.getDate() === 1 || cols.length === 0 ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getDate()}`, left, width: Math.max(right - left, 1) });
-									d.setDate(d.getDate() + 1);
-								}
-							}
-							return cols;
-						})() as col}
-							<div class="text-[10px] text-gray-500 text-center border-r border-gray-100 dark:border-gray-800 py-1 absolute" style="left: {col.left}%; width: {col.width}%;">{col.label}</div>
-						{/each}
-					</div>
-					<!-- Task rows -->
-					{#each ganttEntries as entry, i}
-						{@const sd = new Date(getEntryData(entry, 'startDate')).getTime()}
-						{@const ed = new Date(getEntryData(entry, 'endDate')).getTime()}
-						{@const left = ((sd - minTs) / totalMs) * 100}
-						{@const width = Math.max(((ed - sd) / totalMs) * 100, 2)}
-						{@const ns = getEntryData(entry, 'nodeStatus')}
-						{@const nt = getEntryData(entry, 'nodeType')}
-						{@const vid = getEntryData(entry, 'versionId')}
-						{@const vidMatch = vid ? $versionList.find((v: any) => v.id === vid) : null}
-						{@const vLabel = vidMatch ? (vidMatch.versionNumber || vidMatch.version_number) : (vid && !/^[0-9a-f]{8}-/i.test(vid) ? vid : '')}
-						{@const pg = getEntryData(entry, 'progress') || 0}
-						{@const barColor = ns === 'completed' ? 'bg-green-500' : ns === 'in_progress' ? 'bg-blue-500' : ns === 'delayed' ? 'bg-red-500' : 'bg-gray-400'}
-						{@const durationDays = Math.ceil((ed - sd) / 86400000)}
-						{@const entryDesc = getEntryData(entry, 'description') || ''}
-						<div class="flex items-center gap-2 py-1.5 relative" style="min-height: 36px;">
-							<!-- Label with duration -->
-							<div class="w-48 flex-shrink-0 pr-2 text-right">
-								<div class="text-xs text-gray-700 dark:text-gray-300 truncate">{entry.title}</div>
-								<div class="text-[10px] text-gray-400">{durationDays}天{entryDesc ? ' · ' + entryDesc.slice(0, 20) : ''}</div>
-							</div>
-							<!-- Bar area -->
-							<div class="flex-1 relative h-7">
-								<!-- Grid lines -->
-								{#each Array(Math.ceil((maxTs - minTs) / scaleMs) + 1) as _, wi}
-									{@const gleft = ((wi * scaleMs) / totalMs) * 100}
-									<div class="absolute top-0 bottom-0 border-l border-gray-100 dark:border-gray-800" style="left: {gleft}%;"></div>
-								{/each}
-								<div class="absolute top-0 h-full {barColor} rounded-md opacity-80 flex items-center px-2 cursor-pointer hover:opacity-100 transition" style="left: {left}%; width: {width}%;" onclick={() => openEditDrawer(entry)} title="{entry.title} ({durationDays}天) {entryDesc}">
-									<span class="text-[10px] text-white font-medium truncate">{nodeTypeMap[nt]?.l || ''}{vLabel ? ' · ' + vLabel : ''}{pg ? ` ${pg}%` : ''}</span>
-									{#if pg > 0 && pg < 100}
-										<div class="absolute bottom-0 left-0 h-1 bg-white/30 rounded-b-md" style="width: {pg}%;"></div>
-									{/if}
-								</div>
-							</div>
-						</div>
-					{/each}
-					<!-- Global today marker spanning all rows -->
-					{#if todayLeft >= 0 && todayLeft <= 100}
-						<div class="absolute top-0 bottom-0 w-px bg-red-400 dark:bg-red-500 z-20 pointer-events-none" style="left: calc(0.75rem + 12rem + (100% - 12rem - 1.5rem) * {todayLeft} / 100);">
-							<div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full text-[9px] text-red-500 font-medium whitespace-nowrap bg-white dark:bg-gray-900 px-1 rounded">今天</div>
-						</div>
-					{/if}
-				</div>
-			{/if}
- 			{/key}
+			<GanttChart
+				bind:this={ganttChartRef}
+				entries={ganttEntries}
+				timeScale={ganttTimeScale}
+				moduleType={moduleType}
+				onEntryClick={(e) => openEditDrawer(e)}
+			/>
 		{:else if isTableView}
 			<div class="overflow-x-auto">
 				<table class="w-full text-sm">
@@ -2052,11 +2248,8 @@
 				<input type="text" class="text-sm font-medium bg-transparent border-0 outline-none flex-1 max-w-md text-gray-900 dark:text-gray-100" bind:value={editingDocTitle} placeholder="标题" />
 			</div>
 			<div class="flex items-center gap-2">
+				<PMVersionHistoryDropdown {projectId} entryId={editingEntryId || ''} currentVersionNumber={editingEntry?.currentVersionNumber} />
 				{#if moduleType === 'prd'}
-					<span class="px-2.5 py-1 text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg flex items-center gap-1">
-						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" /></svg>
-						{$currentVersion?.versionNumber || $currentVersion?.version_number || 'v1.0'}
-					</span>
 					{#if saveStatus === 'unsaved'}
 						<span class="px-2 py-1 text-xs text-orange-600 dark:text-orange-400">未保存更改</span>
 					{:else if saveStatus === 'auto-saving'}
@@ -2068,8 +2261,6 @@
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
 						导入
 					</button>
-				{:else}
-					<PMVersionHistoryDropdown {projectId} entryId={editingEntryId || ''} currentVersionNumber={editingEntry?.currentVersionNumber} readonly />
 				{/if}
 				<div class="flex items-center gap-1">
 					<button class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition flex items-center gap-1" onclick={() => { showVersionCompare = true; }} title="版本比较">
@@ -2094,7 +2285,11 @@
 						<option value={v.id}>{v.versionNumber || v.version_number || 'v?'}</option>
 					{/each}
 				</select>
-				<button class="px-3 py-1.5 text-sm bg-black text-white dark:bg-white dark:text-black rounded-lg font-medium" onclick={saveEntryDoc}>保存</button>
+				<button
+					class="px-3 py-1.5 text-sm bg-black text-white dark:bg-white dark:text-black rounded-lg font-medium"
+					onclick={handleSaveWithVersion}
+					title="保存内容并创建文档版本（PMEntryVersion，跟踪单文档修改历史）。与项目版本（PMVersion，整个版本包含哪些条目）相互独立。"
+				>保存</button>
 			</div>
 		</div>
 		<div class="flex flex-1 overflow-hidden">
@@ -2294,7 +2489,15 @@
 													</select>
 													<button class="p-1 text-gray-400 hover:text-red-500 transition" onclick={() => removeCheckItem(i)}>
 														<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-													</button>
+						</button>
+						<button class="px-2 py-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 transition font-medium text-sm flex items-center hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed" onclick={handleExport} disabled={isExporting}>
+						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+						<div class="ml-1 text-xs">{isExporting ? '导出中...' : '导出'}</div>
+					</button>
+						<button class="px-2 py-1.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 transition font-medium text-sm flex items-center hover:bg-gray-50 dark:hover:bg-gray-800" onclick={() => { showImportExport = true; importExportMode = 'import'; }}>
+							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+							<div class="ml-1 text-xs">导入</div>
+						</button>
 												</div>
 												{#if chk.status === 'fail'}
 													<input type="text" class="w-full text-xs px-2 py-1 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg outline-hidden" placeholder="问题描述..." value={chk.issue || ''} oninput={(e) => { updateCheckItem(i, 'issue', (e.target as HTMLInputElement).value); }} />
@@ -2411,18 +2614,20 @@
 					<div class="h-full flex flex-col">
 						<div class="flex-1">
 							<PMFlowchartEditor
-								flowchartData={(editingEntry?.data?.flowchart || { nodes: [], edges: [] })}
-								onChange={(updatedFlowchart) => {
-									if (!editingEntry) return;
-									const d = { ...(editingEntry.data || {}) };
-									d.flowchart = updatedFlowchart;
-									editingEntry = { ...editingEntry, data: d };
-									saveStatus = 'unsaved';
-									triggerAutoSave();
-								}}
-								readonly={editingEntry.status === 'approved' || editingEntry.status === 'archived'}
-								parameterEntries={parameterEntries}
-							/>
+							flowchartData={(editingEntry?.data?.flowchart || { nodes: [], edges: [] })}
+							onChange={(updatedFlowchart) => {
+								if (!editingEntry) return;
+								const d = { ...(editingEntry.data || {}) };
+								d.flowchart = updatedFlowchart;
+								editingEntry = { ...editingEntry, data: d };
+								saveStatus = 'unsaved';
+								triggerAutoSave();
+							}}
+							readonly={editingEntry.status === 'approved' || editingEntry.status === 'archived'}
+						parameterEntries={parameterEntries}
+						{projectId}
+						entryId={editingEntryId || ''}
+					/>
 						</div>
 					</div>
 				{:else}
@@ -2521,10 +2726,51 @@
 					</div>
 				</div>
 				<div>
-					<label class="block text-xs font-medium text-gray-500 mb-1">分类</label>
-					<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" bind:value={editCategory} />
-				</div>
-			{:else if moduleType === 'roadmap'}
+				<label class="block text-xs font-medium text-gray-500 mb-1">分类</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" bind:value={editCategory} />
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">用户角色</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" placeholder="如：运营经理" bind:value={editUserRole} />
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">期望收益</label>
+				<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden resize-none focus:ring-2 focus:ring-blue-500" rows="2" bind:value={editExpectedBenefit}></textarea>
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">标签（逗号分隔）</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" placeholder="如：核心,紧急" value={editTags.join(',')} onchange={(e) => { editTags = (e.target as HTMLInputElement).value.split(',').map((t) => t.trim()).filter(Boolean); }} />
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">关联模块（逗号分隔）</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" placeholder="如：用户管理,订单管理" value={editRelatedModules.join(',')} onchange={(e) => { editRelatedModules = (e.target as HTMLInputElement).value.split(',').map((t) => t.trim()).filter(Boolean); }} />
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">截止日期</label>
+				<input type="date" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" bind:value={editDueDate} />
+			</div>
+		{:else if moduleType === 'requirement-boundary'}
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">功能</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" bind:value={editFunction} />
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">用途</label>
+				<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden resize-none" rows="2" bind:value={editUsage}></textarea>
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">预期效果</label>
+				<textarea class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden resize-none" rows="2" bind:value={editExpectedEffect}></textarea>
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">关联需求（逗号分隔）</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={editRelatedRequirements.join(',')} onchange={(e) => { editRelatedRequirements = (e.target as HTMLInputElement).value.split(',').map((t) => t.trim()).filter(Boolean); }} />
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 mb-1">关联参数（逗号分隔）</label>
+				<input type="text" class="w-full text-sm px-3 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl outline-hidden" value={editRelatedParameters.join(',')} onchange={(e) => { editRelatedParameters = (e.target as HTMLInputElement).value.split(',').map((t) => t.trim()).filter(Boolean); }} />
+			</div>
+		{:else if moduleType === 'roadmap'}
 				<div>
 					<label class="block text-xs font-medium text-gray-500 mb-1">节点类型</label>
 					<select class="w-full text-sm px-2 py-2 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg outline-hidden" value={getEntryData(editDrawerEntry, 'nodeType')} onchange={(e) => { const d = { ...(editDrawerEntry.data || {} ) }; d.nodeType = (e.target as HTMLSelectElement).value; editDrawerEntry = { ...editDrawerEntry, data: d }; }}>
@@ -2843,22 +3089,6 @@
 	/>
 {/if}
 
-<!-- Save Version Dialog -->
-<PMSaveVersionDialog
-	open={showSaveVersionDialog}
-	currentVersionNumber={editingEntry?.currentVersionNumber || 'v1.0'}
-	onClose={() => { showSaveVersionDialog = false; }}
-	onSaveNewVersion={async () => { 
-		showSaveVersionDialog = false; 
-		await saveAsNewVersion(); 
-	}}
-	onSaveContentOnly={async () => { 
-		showSaveVersionDialog = false; 
-		await saveEntryContentOnly(); 
-		toast.success('内容已保存'); 
-	}}
-/>
-
 <!-- SPEC: Template Selection Dialog -->
 <PMSpecTemplateDialog
 	open={showSpecTemplateDialog}
@@ -2941,7 +3171,75 @@
 	</div>
 {/if}
 
-<!-- Calendar Sync Dialog -->
+{#if showImportExport}
+	<PMImportExport
+		show={showImportExport}
+		mode={importExportMode}
+		entries={filteredEntries}
+		{moduleType}
+		{config}
+		versionId={$currentVersion?.id}
+		onImport={async (entriesToImport, importMode) => {
+			try {
+				const token = localStorage.token || '';
+				const currentVer = $currentVersion;
+				const versionId = currentVer?.id;
+
+				if (importMode === 'overwrite') {
+					// Delete all existing entries of this module type first
+					const existing = await getEntries(token, projectId, moduleType);
+					await Promise.all(existing.map((e: any) => deleteEntry(token, e.id)));
+				}
+
+				if (importMode === 'merge') {
+					// Upsert by title
+					const existing = await getEntries(token, projectId, moduleType);
+					const existingByTitle = new Map(existing.map((e: any) => [e.title, e]));
+					for (const entry of entriesToImport) {
+						const existingEntry = existingByTitle.get(entry.title);
+						const payload = {
+							...entry,
+							module_type: moduleType,
+							versionId: entry.versionId || versionId
+						};
+						if (existingEntry) {
+							await updateEntry(token, existingEntry.id, payload);
+						} else {
+							await createEntry(token, projectId, payload);
+						}
+					}
+				} else {
+					// append (default) OR overwrite (after delete loop above, just create all)
+					for (const entry of entriesToImport) {
+						await createEntry(token, projectId, {
+							...entry,
+							module_type: moduleType,
+							versionId: entry.versionId || versionId
+						});
+					}
+				}
+
+				toast.success(`成功导入 ${entriesToImport.length} 条数据 (${importMode === 'append' ? '追加' : importMode === 'overwrite' ? '覆盖' : '合并'})`);
+				await loadEntries();
+			} catch (e: any) {
+				toast.error(e.message || '导入失败');
+			}
+		}}
+		onClose={() => { showImportExport = false; }}
+	/>
+{/if}
+{#if showExportDialog}
+	<PMExportDialog
+		open={showExportDialog}
+		moduleType={moduleType}
+		moduleDisplayName={exportModuleDisplayName}
+		defaultColumns={exportDefaultColumns}
+		versionId={$currentVersion?.id}
+		entries={exportDialogEntries}
+		onClose={() => { showExportDialog = false; }}
+		onExport={handleExportFromDialog}
+	/>
+{/if}
 {#if showCalendarSyncDialog}
 	<div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onclick={handleCalendarSyncCancel}>
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden" onclick={(e) => e.stopPropagation()}>

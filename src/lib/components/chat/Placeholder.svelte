@@ -65,6 +65,9 @@
 
 	export let dragged = false;
 
+	// Part B: 角色提示词 — 透传给内嵌的 MessageInput
+	export let selectedRole: any = null;
+
 	let models = [];
 	let selectedModelIdx = 0;
 
@@ -226,6 +229,7 @@
 					bind:atSelectedModel
 					bind:showCommands
 					bind:dragged
+					bind:selectedRole
 					{pendingOAuthTools}
 					{toolServers}
 					{stopResponse}
@@ -233,6 +237,10 @@
 					placeholder={$i18n.t('How can I help you today?')}
 					{onChange}
 					{onUpload}
+					on:roleChange={(e) => {
+						// 透传角色变更事件给父组件 Chat.svelte
+						dispatch('roleChange', e.detail);
+					}}
 					on:submit={(e) => {
 						dispatch('submit', e.detail);
 					}}

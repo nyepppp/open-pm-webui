@@ -64,8 +64,11 @@ def upgrade():
         for row in results:
             try:
                 # Convert text JSON to actual JSON object, assuming the text is in JSON format
-                json_data = json.loads(row.old_chat)
-            except json.JSONDecodeError:
+                if row.old_chat is not None:
+                    json_data = json.loads(row.old_chat)
+                else:
+                    json_data = None  # Handle None values
+            except (json.JSONDecodeError, TypeError):
                 json_data = None  # Handle cases where the text cannot be converted to JSON
 
             connection.execute(sa.update(chat_table).where(chat_table.c.id == row.id).values(chat=json_data))

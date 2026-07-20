@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { getProject, getVersions, createVersion } from '$lib/apis/pm/index';
+	import { switchVersion } from '$lib/apis/pm/version';
 	import { setCurrentProject, currentProject } from '$lib/stores/pm/projectStore';
 	import { setCurrentVersion, currentVersion, versions, resetVersionStore } from '$lib/stores/pm/versionStore';
 	import { showSidebar } from '$lib/stores';
@@ -22,7 +23,7 @@
 	}
 
 	let { children }: Props = $props();
-	let projectId = $derived($page.params.projectId);
+	let projectId = $derived($page.params.projectId || '');
 	let showVersionDropdown = $state(false);
 	let project = $state<Project | null>(null);
 	let apiStatus = $state<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -52,13 +53,22 @@
 	onMount(() => { loadProject(); });
 
 	$effect(() => {
-		projectId;
-		loadProject();
+		const currentId = $page.params.projectId;
+		if (currentId && currentId !== projectId) {
+			projectId = currentId;
+			loadProject();
+		}
 	});
 
-	function selectVersion(v: Version) {
+	async function selectVersion(v: Version) {
 		setCurrentVersion(v);
 		showVersionDropdown = false;
+		// Persist to backend (non-fatal — client-side selection still works if this fails)
+		try {
+			await switchVersion(projectId, v.id);
+		} catch (e) {
+			console.warn('[PM] Server-side version switch failed (non-fatal):', e);
+		}
 	}
 
 	async function createNewVersion() {
@@ -66,11 +76,12 @@
 		try {
 			const token = localStorage.token || '';
 			const v = await createVersion(token, projectId, { version_number: newVersionNumber });
+			versions.update(list => [...list, v]);
 			setCurrentVersion(v);
 			newVersionNumber = '';
 			showNewVersionForm = false;
 			showVersionDropdown = false;
-			toast.success(`版本 ${v.versionNumber} 创建成功`);
+			toast.success(`版本 ${v.versionNumber || v.version_number || newVersionNumber} 创建成功`);
 		} catch (e: any) {
 			toast.error(e.message || '创建版本失败');
 		}

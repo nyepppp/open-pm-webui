@@ -589,3 +589,146 @@ export const getPromptDiff = async (
 
 	return res;
 };
+
+////////////////////////////
+// Part B: 角色提示词（Role Prompts）API
+// 复用 prompts 路由，通过 is_role 字段区分
+////////////////////////////
+
+/** 角色提示词结构（与后端 RoleForm + Prompt.data 合并对齐） */
+export interface RolePrompt {
+	id: string;
+	command: string;
+	name: string;
+	content?: string;
+	user_id?: string;
+	is_role?: boolean;
+	created_at?: number;
+	updated_at?: number;
+	// 角色配置（存于 prompt.data）
+	system_prompt?: string;
+	tools?: string[];
+	suggested_models?: string[];
+	description?: string;
+	user?: { id: string; name: string; email: string } | null;
+}
+
+/** 角色表单（升级/更新时提交给后端） */
+export interface RoleForm {
+	system_prompt: string;
+	tools: string[];
+	suggested_models: string[];
+	description: string;
+}
+
+/** 将后端返回的 prompt（含 data 字段）展开为 RolePrompt */
+function normalizeRolePrompt(raw: any): RolePrompt {
+	const data = raw?.data || {};
+	return {
+		id: raw.id,
+		command: raw.command,
+		name: raw.name,
+		content: raw.content,
+		user_id: raw.user_id,
+		is_role: raw.is_role ?? true,
+		created_at: raw.created_at,
+		updated_at: raw.updated_at,
+		system_prompt: data.system_prompt ?? '',
+		tools: Array.isArray(data.tools) ? data.tools : [],
+		suggested_models: Array.isArray(data.suggested_models) ? data.suggested_models : [],
+		description: data.description ?? raw?.meta?.description ?? '',
+		user: raw.user ?? null
+	};
+}
+
+/** 获取当前用户可见的所有角色提示词 */
+export const getRoles = async (token: string = ''): Promise<RolePrompt[]> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/prompts/roles`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return Array.isArray(res) ? res.map(normalizeRolePrompt) : [];
+};
+
+/** 将普通 prompt 升级为角色（或更新已存在角色的配置） */
+export const upgradeToRole = async (
+	token: string,
+	promptId: string,
+	form: RoleForm
+): Promise<RolePrompt> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/prompts/id/${promptId}/role`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(form)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return normalizeRolePrompt(res);
+};
+
+/** 取消角色标记（is_role=false，保留 data 内容） */
+export const removeRole = async (token: string, promptId: string): Promise<RolePrompt> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/prompts/id/${promptId}/role`, {
+		method: 'DELETE',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return normalizeRolePrompt(res);
+};

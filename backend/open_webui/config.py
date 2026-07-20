@@ -3098,6 +3098,17 @@ TASK_MODEL_EXTERNAL = ConfigVar(
     os.getenv('TASK_MODEL_EXTERNAL', ''),
 )
 
+# Bug 6 (v9): Per-model function calling mode override.
+# Format: comma-separated "model_id:mode" pairs where mode is 'native' | 'default'.
+# Example: "doubao-seed-evolving:default,gpt-4o:native"
+# Doubao leaks native function-call tokens as text; defaulting to 'default' (prompt-based FC)
+# reduces leaks at the source. The text-form FC parser in middleware.py acts as backup.
+MODEL_FUNCTION_CALLING_OVERRIDES = ConfigVar(
+    'MODEL_FUNCTION_CALLING_OVERRIDES',
+    'model.function_calling.overrides',
+    os.getenv('MODEL_FUNCTION_CALLING_OVERRIDES', 'doubao-seed-evolving:default'),
+)
+
 TITLE_GENERATION_PROMPT_TEMPLATE = ConfigVar(
     'TITLE_GENERATION_PROMPT_TEMPLATE',
     'task.title.prompt_template',

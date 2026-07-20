@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { SvelteFlow, Controls, Background, type Node, type Edge, type Connection } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
-	import { getTraceability } from '$lib/apis/pm/relation';
 	import { createRelation, deleteRelation } from '$lib/apis/pm/relation';
+	import { loadTraceChain, invalidateProject, traceChain as traceChainStore } from '$lib/stores/pm/traceabilityStore';
 	import PMRelationTypeSelector from './PMRelationTypeSelector.svelte';
 	import type { RelationType } from '$lib/apis/pm/types';
 	import { toast } from 'svelte-sonner';
@@ -84,19 +84,25 @@
 		}
 	});
 
+	// 订阅 store，链路变化时重建图
+	$effect(() => {
+		const chain = $traceChainStore;
+		if (chain && chain.length) {
+			buildGraph(chain);
+		} else {
+			flowNodes = [];
+			flowEdges = [];
+			allNodes = [];
+			allEdges = [];
+		}
+	});
+
 	async function loadTraceability() {
 		loading = true;
 		error = '';
 		try {
-			const data = await getTraceability(projectId, entityId, direction);
-			if (data && data.chain) {
-				buildGraph(data.chain);
-			} else {
-				flowNodes = [];
-				flowEdges = [];
-				allNodes = [];
-				allEdges = [];
-			}
+			await loadTraceChain(projectId, entityId, direction);
+			// 链路数据通过 traceChainStore 订阅在 $effect 中自动 buildGraph
 		} catch (e) {
 			error = '加载追溯链路时出错';
 			console.error(e);
@@ -105,25 +111,28 @@
 		}
 	}
 
-	function buildGraph(chain: { entityId: string; entityType: string; relationType: string; depth: number }[]) {
+	function buildGraph(chain: { entity: any; depth: number; path: any[] }[]) {
 		const nodes: Node[] = [];
 		const edges: Edge[] = [];
 
 		chain.forEach((item, index) => {
 			const yOffset = index * 120;
 			const isRoot = index === 0;
-			const colors = entityTypeColors[item.entityType] || { bg: '#f3f4f6', border: '#9ca3af' };
-			const typeLabel = entityTypeLabels[item.entityType] || item.entityType;
-			const entry = entries.find(e => e.id === item.entityId);
-			const versionNum = entry?.currentVersionNumber || (entry?.data?.versionNumber as string) || '';
-			const label = versionNum ? `${typeLabel} ${versionNum}\n${item.entityId.substring(0, 8)}...` : `${typeLabel}\n${item.entityId.substring(0, 8)}...`;
+			const entity = item.entity || {};
+			const entityType = entity.type || 'unknown';
+			const entityId = entity.id || entity.entry_id || `node-${index}`;
+			const colors = entityTypeColors[entityType] || { bg: '#f3f4f6', border: '#9ca3af' };
+			const typeLabel = entityTypeLabels[entityType] || entityType;
+			const entry = entries.find(e => e.id === entityId);
+			const versionNum = entry?.currentVersionNumber || '';
+			const label = versionNum ? `${typeLabel} ${versionNum}\n${entityId.substring(0, 8)}...` : `${typeLabel}\n${entityId.substring(0, 8)}...`;
 
 			nodes.push({
-				id: item.entityId,
+				id: entityId,
 				position: { x: 250 + (item.depth * 220), y: yOffset },
 				data: {
 					label,
-					entityType: item.entityType
+					entityType
 				},
 				style: {
 					background: isRoot ? '#dbeafe' : colors.bg,
@@ -144,15 +153,20 @@
 			});
 
 			if (index > 0) {
-				const relLabel = relationLabels[item.relationType] || item.relationType;
+				const prevEntity = chain[index - 1].entity || {};
+				const prevId = prevEntity.id || prevEntity.entry_id || `node-${index - 1}`;
+				// 从 path 推断关系类型（后端 path 步骤结构：{from, to, type}）
+				const pathStep = item.path?.[item.path.length - 1];
+				const relType = pathStep?.type || 'references';
+				const relLabel = relationLabels[relType] || relType;
 				edges.push({
-					id: `e-${chain[index - 1].entityId}-${item.entityId}`,
-					source: chain[index - 1].entityId,
-					target: item.entityId,
+					id: `e-${prevId}-${entityId}`,
+					source: prevId,
+					target: entityId,
 					label: relLabel,
-					style: { stroke: item.relationType === 'conflicts' ? '#ef4444' : '#9ca3af', strokeWidth: 2 },
+					style: { stroke: relType === 'conflicts' ? '#ef4444' : '#9ca3af', strokeWidth: 2 },
 					type: 'smoothstep',
-					labelStyle: { fill: item.relationType === 'conflicts' ? '#ef4444' : '#6b7280', fontWeight: 500, fontSize: 11 },
+					labelStyle: { fill: relType === 'conflicts' ? '#ef4444' : '#6b7280', fontWeight: 500, fontSize: 11 },
 					labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 }
 				});
 			}
@@ -171,20 +185,13 @@
 	async function handleRelationSelect(relationType: RelationType) {
 		if (!pendingConnection || !projectId) return;
 		try {
-			const srcEntry = entries.find(e => e.id === pendingConnection!.source);
-			const tgtEntry = entries.find(e => e.id === pendingConnection!.target);
-			const versionSnapshot = {
-				entityAVersionNumber: srcEntry?.currentVersionNumber || (srcEntry?.data?.versionNumber as string) || '',
-				entityBVersionNumber: tgtEntry?.currentVersionNumber || (tgtEntry?.data?.versionNumber as string) || ''
-			};
 			await createRelation(projectId, {
 				entityAId: pendingConnection.source,
 				entityBId: pendingConnection.target,
 				relationType,
 				confidence: 100,
 				confirmed: 1,
-				createdBy: 'user',
-				versionSnapshot
+				createdBy: 'user'
 			});
 			const relLabel = relationLabels[relationType] || relationType;
 			const newEdge: Edge = {
@@ -199,6 +206,7 @@
 			};
 			allEdges = [...allEdges, newEdge];
 			toast.success('关联创建成功');
+			invalidateProject(projectId);  // 清缓存，下次打开重新拉
 		} catch (e: any) {
 			toast.error(e?.message || '创建关联失败');
 		} finally {
@@ -277,15 +285,15 @@
 					</div>
 				{:else}
 					<SvelteFlow
-						nodes={$flowNodes}
-						edges={$flowEdges}
-						fitView
-						nodesDraggable={true}
-						minZoom={0.3}
-						maxZoom={2}
-						onconnect={handleConnect}
-						onnodedoubleclick={handleNodeDoubleClick}
-					>
+					nodes={flowNodes}
+					edges={flowEdges}
+					fitView
+					nodesDraggable={true}
+					minZoom={0.3}
+					maxZoom={2}
+					onconnect={handleConnect}
+					onnodedoubleclick={handleNodeDoubleClick}
+				>
 						<Background patternColor="#e5e7eb" gap={20} />
 						<Controls />
 					</SvelteFlow>

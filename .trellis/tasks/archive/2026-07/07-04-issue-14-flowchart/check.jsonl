@@ -1,8 +1,0 @@
-{"id":"flowchart-acceptance","type":"check","content":"验证流程图模块是否满足以下验收标准：1) 导航栏出现流程图入口 2) 支持CRUD操作 3) 编辑器支持拖拽节点和连线 4) 节点可配置输入/输出参数并与参数清单关联 5) 参数清单显示关联节点信息 6) 支持查看模式、缩放和平移 7) 数据持久化正确 8) 与版本系统兼容 9) 支持自定义节点类型和样式","tags":["acceptance","flowchart","verification","custom-node"]}
-{"id":"xyflow-integration","type":"check","content":"验证 @xyflow/svelte 集成是否正确：1) 画布渲染正常 2) 节点拖拽流畅 3) 连线功能正常 4) 缩放平移无卡顿 5) 自定义节点样式正确（颜色、边框、形状、大小） 6) 节点属性面板正常弹出 7) 动态形状渲染正确（矩形、圆角、圆形、菱形、椭圆）","tags":["xyflow","integration","ui","custom-shape"]}
-{"id":"parameter-traceability-bidirectional","type":"check","content":"验证双向同步参数关联功能：1) 节点可选择参数清单中的参数 2) 流程图→参数清单：节点参数变更时参数清单同步更新（flowchartRefs字段） 3) 参数清单→流程图：参数删除时流程图节点同步清理关联 4) 参数清单表格显示关联节点列，格式：参数 → 需求-流程图-节点名称 5) 点击跳转功能正常","tags":["parameter","traceability","association","bidirectional-sync"]}
-{"id":"data-persistence","type":"check","content":"验证数据持久化：1) 流程图数据正确存储在 ModuleEntry.data.flowchart 中 2) 刷新页面后数据不丢失 3) 版本切换时数据正确加载 4) JSON序列化/反序列化正确（含自定义样式数据） 5) 数据格式符合 FlowchartData 类型定义 6) 自定义节点类型定义持久化正确","tags":["persistence","data","versioning","custom-node"]}
-{"id":"type-safety","type":"check","content":"验证类型安全：1) 新增 flowchart ModuleType 无类型错误 2) FlowchartData/CustomNodeType/NodeStyle 类型定义完整 3) 组件 props 类型正确 4) API 调用类型匹配 5) npm run check 通过无新增类型错误","tags":["types","safety","typescript","custom-node"]}
-{"id":"custom-node-types","type":"check","content":"验证自定义节点类型功能：1) 可创建自定义节点类型 2) 可设置默认样式（颜色、边框、形状、大小、图标） 3) 节点可覆盖默认样式 4) 预设模板（开始、处理、判断、结束）可用 5) 节点类型管理器正常工作（创建、编辑、删除）","tags":["custom-node","node-types","templates"]}
-{"id":"bidirectional-sync","type":"check","content":"验证双向同步机制：1) 流程图节点添加参数时，参数清单同步更新 2) 流程图节点移除参数时，参数清单同步清理 3) 参数删除时，流程图节点中的关联自动移除 4) 同步通过API事务保证一致性 5) 无数据不一致或 orphaned 引用","tags":["bidirectional-sync","consistency","transaction"]}
-

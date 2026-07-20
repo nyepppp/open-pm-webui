@@ -1,237 +1,165 @@
-# Open WebUI 👋
+# Open PM WebUI 📋
 
-![GitHub stars](https://img.shields.io/github/stars/open-webui/open-webui?style=social)
-![GitHub forks](https://img.shields.io/github/forks/open-webui/open-webui?style=social)
-![GitHub watchers](https://img.shields.io/github/watchers/open-webui/open-webui?style=social)
-![GitHub repo size](https://img.shields.io/github/repo-size/open-webui/open-webui)
-![GitHub language count](https://img.shields.io/github/languages/count/open-webui/open-webui)
-![GitHub top language](https://img.shields.io/github/languages/top/open-webui/open-webui)
-![GitHub last commit](https://img.shields.io/github/last-commit/open-webui/open-webui?color=red)
-[![Discord](https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white)](https://discord.gg/5rJgQTnV4s)
-[![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/tjbck)
+![Version](https://img.shields.io/badge/version-0.1.0--pm-blue)
+![Upstream](https://img.shields.io/badge/based%20on-OpenWebUI%200.9.6%20%2B%20Timbal-blue)
+![License](https://img.shields.io/badge/license-Open%20WebUI%20License-orange)
 
-![Open WebUI Banner](./banner.png)
+![Open PM WebUI Banner](./banner.png)
 
-**Open WebUI is an [extensible](https://docs.openwebui.com/features/extensibility/plugin), feature-rich, and user-friendly self-hosted AI platform designed to operate entirely offline.** It supports various LLM runners like **Ollama** and **OpenAI-compatible APIs**, with **built-in inference engine** for RAG, making it a **powerful AI deployment solution**.
-
-Passionate about open-source AI? [Join our team →](https://careers.openwebui.com/)
-
-![Open WebUI Demo](./demo.png)
-
-> [!TIP]  
-> **Looking for an [Enterprise Plan](https://docs.openwebui.com/enterprise)?** – **[Speak with Our Sales Team Today!](https://docs.openwebui.com/enterprise)**
->
-> Get **enhanced capabilities**, including **custom theming and branding**, **Service Level Agreement (SLA) support**, **Long-Term Support (LTS) versions**, and **more!**
-
-For more information, be sure to check out our [Open WebUI Documentation](https://docs.openwebui.com/).
-
-## Key Features of Open WebUI ⭐
-
-- 🚀 **Effortless Setup**: Install seamlessly using Docker or Kubernetes (kubectl, kustomize or helm) for a hassle-free experience with support for both `:ollama` and `:cuda` tagged images.
-
-- 🤝 **Ollama/OpenAI API Integration**: Effortlessly integrate OpenAI-compatible APIs for versatile conversations alongside Ollama models. Customize the OpenAI API URL to link with **LMStudio, GroqCloud, Mistral, OpenRouter, and more**.
-
-- 🛡️ **Granular Permissions and User Groups**: By allowing administrators to create detailed user roles and permissions, we ensure a secure user environment. This granularity not only enhances security but also allows for customized user experiences, fostering a sense of ownership and responsibility amongst users.
-
-- 📱 **Responsive Design**: Enjoy a seamless experience across Desktop PC, Laptop, and Mobile devices.
-
-- 📱 **Progressive Web App (PWA) for Mobile**: Enjoy a native app-like experience on your mobile device with our PWA, providing offline access on localhost and a seamless user interface.
-
-- ✒️🔢 **Full Markdown and LaTeX Support**: Elevate your LLM experience with comprehensive Markdown and LaTeX capabilities for enriched interaction.
-
-- 🎤📹 **Hands-Free Voice/Video Call**: Experience seamless communication with integrated hands-free voice and video call features using multiple Speech-to-Text providers (Local Whisper, OpenAI, Deepgram, Azure) and Text-to-Speech engines (Azure, ElevenLabs, OpenAI, Transformers, WebAPI), allowing for dynamic and interactive chat environments.
-
-- 🛠️ **Model Builder**: Easily create Ollama models via the Web UI. Create and add custom characters/agents, customize chat elements, and import models effortlessly through [Open WebUI Community](https://openwebui.com/) integration.
-
-- 🐍 **Native Python Function Calling Tool**: Enhance your LLMs with built-in code editor support in the tools workspace. Bring Your Own Function (BYOF) by simply adding your pure Python functions, enabling seamless integration with LLMs.
-
-- 💾 **Persistent Artifact Storage**: Built-in key-value storage API for artifacts, enabling features like journals, trackers, leaderboards, and collaborative tools with both personal and shared data scopes across sessions.
-
-- 📚 **Local RAG Integration**: Dive into the future of chat interactions with groundbreaking Retrieval Augmented Generation (RAG) support using your choice of 9 vector databases and multiple content extraction engines (Tika, Docling, Document Intelligence, Mistral OCR, PaddleOCR-vl, External loaders). Load documents directly into chat or add files to your document library, effortlessly accessing them using the `#` command before a query.
-
-- 🔍 **Web Search for RAG**: Perform web searches using 15+ providers including `SearXNG`, `Google PSE`, `Brave Search`, `Kagi`, `Mojeek`, `Tavily`, `Perplexity`, `serpstack`, `serper`, `Serply`, `DuckDuckGo`, `SearchApi`, `SerpApi`, `Bing`, `Jina`, `Exa`, `Sougou`, `Azure AI Search`, and `Ollama Cloud`, injecting results directly into your chat experience.
-
-- 🌐 **Web Browsing Capability**: Seamlessly integrate websites into your chat experience using the `#` command followed by a URL. This feature allows you to incorporate web content directly into your conversations, enhancing the richness and depth of your interactions.
-
-- 🎨 **Image Generation & Editing Integration**: Create and edit images using multiple engines including OpenAI's DALL-E, Gemini, ComfyUI (local), and AUTOMATIC1111 (local), with support for both generation and prompt-based editing workflows.
-
-- ⚙️ **Many Models Conversations**: Effortlessly engage with various models simultaneously, harnessing their unique strengths for optimal responses. Enhance your experience by leveraging a diverse set of models in parallel.
-
-- 🔐 **Role-Based Access Control (RBAC)**: Ensure secure access with restricted permissions; only authorized individuals can access your Ollama, and exclusive model creation/pulling rights are reserved for administrators.
-
-- 🗄️ **Flexible Database & Storage Options**: Choose from SQLite (with optional encryption), PostgreSQL, or configure cloud storage backends (S3, Google Cloud Storage, Azure Blob Storage) for scalable deployments.
-
-- 🔍 **Advanced Vector Database Support**: Select from 9 vector database options including ChromaDB, PGVector, Qdrant, Milvus, Elasticsearch, OpenSearch, Pinecone, S3Vector, and Oracle 23ai for optimal RAG performance.
-
-- 🔐 **Enterprise Authentication**: Full support for LDAP/Active Directory integration, SCIM 2.0 automated provisioning, and SSO via trusted headers alongside OAuth providers. Enterprise-grade user and group provisioning through SCIM 2.0 protocol, enabling seamless integration with identity providers like Okta, Azure AD, and Google Workspace for automated user lifecycle management.
-
-- ☁️ **Cloud-Native Integration**: Native support for Google Drive and OneDrive/SharePoint file picking, enabling seamless document import from enterprise cloud storage.
-
-- 📊 **Production Observability**: Built-in OpenTelemetry support for traces, metrics, and logs, enabling comprehensive monitoring with your existing observability stack.
-
-- ⚖️ **Horizontal Scalability**: Redis-backed session management and WebSocket support for multi-worker and multi-node deployments behind load balancers.
-
-- 🌐🌍 **Multilingual Support**: Experience Open WebUI in your preferred language with our internationalization (i18n) support. Join us in expanding our supported languages! We're actively seeking contributors!
-
-- 🧩 **Pipelines, Open WebUI Plugin Support**: Seamlessly integrate custom logic and Python libraries into Open WebUI using [Pipelines Plugin Framework](https://github.com/open-webui/pipelines). Launch your Pipelines instance, set the OpenAI URL to the Pipelines URL, and explore endless possibilities. [Examples](https://github.com/open-webui/pipelines/tree/main/examples) include **Function Calling**, User **Rate Limiting** to control access, **Usage Monitoring** with tools like Langfuse, **Live Translation with LibreTranslate** for multilingual support, **Toxic Message Filtering** and much more.
-
-- 🌟 **Continuous Updates**: We are committed to improving Open WebUI with regular updates, fixes, and new features.
-
-Want to learn more about Open WebUI's features? Check out our [Open WebUI documentation](https://docs.openwebui.com/features) for a comprehensive overview!
+**Open PM WebUI** 是一个面向产品经理的 AI 协作工作台，把 PRD、产品架构、需求池、参数清单、测试用例、风险问题、会议纪要、验收复盘、FAQ 等产品管理模块整合到统一界面中，并通过 AI Agent 自动化完成需求拆解、模块-功能-参数结构化、版本对比、影响分析等高价值任务。
 
 ---
 
-We are incredibly grateful for the generous support of our sponsors. Their contributions help us to maintain and improve our project, ensuring we can continue to deliver quality work to our community. Thank you!
+## 🧱 项目身份与上游声明
 
-## How to Install 🚀
+本项目是 [OpenWebUI](https://github.com/open-webui/open-webui) v0.9.6 的衍生项目，并在两个方向上做了扩展：
 
-### Installation via Python pip 🐍
+1. **PM 工作台层** —— 在 OpenWebUI 之上叠加了一套完整的产品管理工作台，包含 9 大业务模块、版本控制、模块间关联追溯、思维导图 / 甘特图等多种可视化编辑器。
+2. **Timbal 工作流引擎** —— 集成 [Timbal](https://github.com/timbal-ai/timbal) 作为工作流执行引擎，让 AI Agent 能够通过显式工作流完成 PRD→模块-功能-参数结构化转换、批量条目创建、二阶段确认删除等复杂操作。
 
-Open WebUI can be installed using pip, the Python package installer. Before proceeding, ensure you're using **Python 3.11** to avoid compatibility issues.
+### 上游致谢
 
-1. **Install Open WebUI**:
-   Open your terminal and run the following command to install Open WebUI:
+- **[OpenWebUI](https://github.com/open-webui/open-webui)** by Timothy Jaeryang Baek —— 提供了聊天界面、模型管理、用户权限、RAG、Pipelines 等基础设施。本项目复用了 OpenWebUI 的全部基础设施层，仅在其上添加 PM 工作台和 Timbal 集成。
+- **[Timbal](https://github.com/timbal-ai/timbal)** —— 提供了 Python 工作流执行引擎，作为 PM Agent 调用工具的运行时。
+- **[pm-skills](https://github.com/phuryn/pm-skills)** v2.1.0 by phuryn —— 提供 68+ PM 技能定义（PRD、需求、参数、测试用例等），vendored 在 `backend/open_webui/pm/skills/pm-skills/`。本项目按原 License 使用，未做修改。
 
-   ```bash
-   pip install open-webui
-   ```
+### License 声明
 
-2. **Running Open WebUI**:
-   After installation, you can start Open WebUI by executing:
+本仓库沿用 OpenWebUI 的多许可证策略，详见：
+- [LICENSE](./LICENSE) —— Open WebUI License（适用于当前及之后的所有提交）
+- [LICENSE_HISTORY](./LICENSE_HISTORY) —— 早期 MIT / BSD-3-Clause 提交的许可证历史
+- [LICENSE_NOTICE](./LICENSE_NOTICE) —— 多许可证切换的 commit 边界说明
 
-   ```bash
-   open-webui serve
-   ```
-
-This will start the Open WebUI server, which you can access at [http://localhost:8080](http://localhost:8080)
-
-### Quick Start with Docker 🐳
-
-> [!NOTE]  
-> Please note that for certain Docker environments, additional configurations might be needed. If you encounter any connection issues, our detailed guide on [Open WebUI Documentation](https://docs.openwebui.com/) is ready to assist you.
-
-> [!WARNING]
-> When using Docker to install Open WebUI, make sure to include the `-v open-webui:/app/backend/data` in your Docker command. This step is crucial as it ensures your database is properly mounted and prevents any loss of data.
-
-> [!TIP]  
-> If you wish to utilize Open WebUI with Ollama included or CUDA acceleration, we recommend utilizing our official images tagged with either `:cuda` or `:ollama`. To enable CUDA, you must install the [Nvidia CUDA container toolkit](https://docs.nvidia.com/dgx/nvidia-container-runtime-upgrade/) on your Linux/WSL system.
-
-### Installation with Default Configuration
-
-- **If Ollama is on your computer**, use this command:
-
-  ```bash
-  docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
-  ```
-
-- **If Ollama is on a Different Server**, use this command:
-
-  To connect to Ollama on another server, change the `OLLAMA_BASE_URL` to the server's URL:
-
-  ```bash
-  docker run -d -p 3000:8080 -e OLLAMA_BASE_URL=https://example.com -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
-  ```
-
-- **To run Open WebUI with Nvidia GPU support**, use this command:
-
-  ```bash
-  docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
-  ```
-
-### Installation for OpenAI API Usage Only
-
-- **If you're only using OpenAI API**, use this command:
-
-  ```bash
-  docker run -d -p 3000:8080 -e OPENAI_API_KEY=your_secret_key -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
-  ```
-
-### Installing Open WebUI with Bundled Ollama Support
-
-This installation method uses a single container image that bundles Open WebUI with Ollama, allowing for a streamlined setup via a single command. Choose the appropriate command based on your hardware setup:
-
-- **With GPU Support**:
-  Utilize GPU resources by running the following command:
-
-  ```bash
-  docker run -d -p 3000:8080 --gpus=all -v ollama:/root/.ollama -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:ollama
-  ```
-
-- **For CPU Only**:
-  If you're not using a GPU, use this command instead:
-
-  ```bash
-  docker run -d -p 3000:8080 -v ollama:/root/.ollama -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:ollama
-  ```
-
-Both commands facilitate a built-in, hassle-free installation of both Open WebUI and Ollama, ensuring that you can get everything up and running swiftly.
-
-After installation, you can access Open WebUI at [http://localhost:3000](http://localhost:3000). Enjoy! 😄
-
-### Other Installation Methods
-
-We offer various installation alternatives, including non-Docker native installation methods, Docker Compose, Kustomize, and Helm. Visit our [Open WebUI Documentation](https://docs.openwebui.com/getting-started/) or join our [Discord community](https://discord.gg/5rJgQTnV4s) for comprehensive guidance.
-
-### Troubleshooting
-
-Encountering connection issues? Our [Open WebUI Documentation](https://docs.openwebui.com/troubleshooting/) has got you covered. For further assistance and to join our vibrant community, visit the [Open WebUI Discord](https://discord.gg/5rJgQTnV4s).
-
-#### Open WebUI: Server Connection Error
-
-If you're experiencing connection issues, it’s often due to the WebUI docker container not being able to reach the Ollama server at 127.0.0.1:11434 (host.docker.internal:11434) inside the container . Use the `--network=host` flag in your docker command to resolve this. Note that the port changes from 3000 to 8080, resulting in the link: `http://localhost:8080`.
-
-**Example Docker Command**:
-
-```bash
-docker run -d --network=host -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://127.0.0.1:11434 --name open-webui --restart always ghcr.io/open-webui/open-webui:main
-```
-
-### Keeping Your Docker Installation Up-to-Date
-
-Check our Updating Guide available in our [Open WebUI Documentation](https://docs.openwebui.com/getting-started/updating).
-
-### Using the Dev Branch 🌙
-
-> [!WARNING]
-> The `:dev` branch contains the latest unstable features and changes. Use it at your own risk as it may have bugs or incomplete features.
-
-If you want to try out the latest bleeding-edge features and are okay with occasional instability, you can use the `:dev` tag like this:
-
-```bash
-docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui --add-host=host.docker.internal:host-gateway --restart always ghcr.io/open-webui/open-webui:dev
-```
-
-### Offline Mode
-
-If you are running Open WebUI in an offline environment, you can set the `HF_HUB_OFFLINE` environment variable to `1` to prevent attempts to download models from the internet.
-
-```bash
-export HF_HUB_OFFLINE=1
-```
-
-## What's Next? 🌟
-
-Discover upcoming features on our roadmap in the [Open WebUI Documentation](https://docs.openwebui.com/roadmap/).
-
-## License 📜
-
-This project contains code under multiple licenses. The current codebase includes components licensed under the Open WebUI License with an additional requirement to preserve the "Open WebUI" branding, as well as prior contributions under their respective original licenses. For a detailed record of license changes and the applicable terms for each section of the code, please refer to [LICENSE_HISTORY](./LICENSE_HISTORY). For complete and updated licensing details, please see the [LICENSE](./LICENSE) and [LICENSE_HISTORY](./LICENSE_HISTORY) files.
-
-## Support 💬
-
-If you have any questions, suggestions, or need assistance, please open an issue or join our
-[Open WebUI Discord community](https://discord.gg/5rJgQTnV4s) to connect with us! 🤝
-
-## Star History
-
-<a href="https://star-history.com/#open-webui/open-webui&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=open-webui/open-webui&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=open-webui/open-webui&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=open-webui/open-webui&type=Date" />
-  </picture>
-</a>
+按 Open WebUI License 第 4 条，本衍生项目在终端用户数 ≤ 50（30 天滚动窗口）的场景下保留原品牌权利；如超出此范围需获得 Open WebUI Inc. 的书面许可。
 
 ---
 
-Created by [Timothy Jaeryang Baek](https://github.com/tjbck) - Let's make Open WebUI even more amazing together! 💪
+## ✨ PM 平台核心特性
+
+### 1. 模块化工作台
+
+按规划 / 设计 / 执行 / 复盘 4 大业务分类组织 9 大模块：
+
+| 分类 | 模块 |
+|------|------|
+| 🗺️ 规划 | PRD 文档、需求池、竞品分析、路线图 |
+| 🎨 设计 | 参数清单、测试用例 |
+| ⚡ 执行 | 风险问题、会议纪要 |
+| 📊 复盘 | 验收复盘、FAQ / 培训、产品架构 |
+
+### 2. 差异化编辑器
+
+- 富文本（TipTap）：PRD、竞品、会议、验收、FAQ
+- 结构化表单（zod 验证）：需求、参数、测试用例
+- 混合编辑器：风险（表单 + 富文本）
+- 思维导图（@xyflow/svelte）：路线图、产品架构
+- 甘特图（frappe-gantt）
+
+### 3. 版本控制
+
+项目级版本快照 + 模块级增量标记，支持版本对比与回滚。
+
+### 4. 数据关联与追溯
+
+模块间双向可见的关联关系（参数 → PRD、测试用例 → 需求 / 参数），可视化追溯图，删除引用保护。
+
+### 5. AI Agent 智能辅助
+
+PM Agent 通过 9 个内置工具完成：
+- PRD → 模块-功能-参数结构化转换
+- 批量条目创建与预览
+- 二阶段确认删除（危险操作先 preview 再执行）
+- 多轮工具调用（基于 OpenWebUI 标准 chat loop）
+- 模块间关联创建
+
+### 6. Timbal 工作流集成
+
+- 显式调用：通过 `/pm-write-prd` 等命令直接触发工作流
+- Agent 调用：PM Agent 在 chat 中自主选择并调用工作流
+- 双重持久化：执行结果同时写入执行日志和 PM 工作台
+
+---
+
+## 🚀 快速开始
+
+### 前置依赖
+
+- Python 3.11
+- Node.js 18.13+（≤22.x）
+- pnpm
+
+### 后端启动
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+./start.sh  # Windows: start_windows.bat
+```
+
+### 前端启动
+
+```bash
+pnpm install
+pnpm dev
+```
+
+访问 http://localhost:8080
+
+---
+
+## 📚 文档
+
+- [PM 工作台设计](./docs/pm-workspace.md)
+- [PM 开发者指南](./docs/pm-developer-guide.md)
+- [Workflow Designer v2](./docs/workflow-designer-v2.md)
+- [Trae Agent Code Wiki](./docs/trae-agent-code-wiki.md)
+
+---
+
+## 🗂️ 项目结构
+
+```
+open-pm-webui/
+├── backend/
+│   ├── lib/timbal/                   # Timbal 框架（vendored）
+│   └── open_webui/
+│       ├── pm/                       # PM 平台核心
+│       │   ├── agent/                # PM Agent
+│       │   ├── api/                  # PM API routes
+│       │   ├── chat_context.py       # D42 系统消息
+│       │   ├── models/               # PM 数据模型
+│       │   ├── services/             # PM 业务服务
+│       │   ├── skills/               # PM skills 集成
+│       │   ├── tools/                # PM 内置工具
+│       │   └── workflows/            # PM 工作流定义
+│       ├── routers/                  # OpenWebUI + PM + Timbal 路由
+│       └── ...                       # OpenWebUI 基础设施（复用）
+├── src/
+│   ├── lib/
+│   │   ├── apis/pm/                  # PM 前端 API
+│   │   ├── apis/timbal/              # Timbal 前端 API
+│   │   ├── components/pm/            # PM UI 组件
+│   │   └── stores/pm/                # PM 状态管理
+│   └── routes/(app)/pm/              # PM 页面路由
+├── docs/                             # PM 平台文档
+├── LICENSE                           # Open WebUI License
+├── LICENSE_HISTORY                   # 早期 license 历史
+└── LICENSE_NOTICE                    # 多 license 切换说明
+```
+
+---
+
+## 🤝 贡献
+
+本项目当前不接受外部贡献。如需反馈或报告问题，请通过 GitHub Issues。
+
+---
+
+## 📄 License
+
+本项目沿用 [Open WebUI License](./LICENSE)。详见 [LICENSE_HISTORY](./LICENSE_HISTORY) 和 [LICENSE_NOTICE](./LICENSE_NOTICE)。
+
+Copyright (c) 2023- Open WebUI Inc. [Created by Timothy Jaeryang Baek]
+PM 平台扩展部分 Copyright (c) 2026 open-pm-webui contributors.

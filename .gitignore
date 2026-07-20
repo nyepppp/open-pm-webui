@@ -310,3 +310,39 @@ dist
 cypress/videos
 cypress/screenshots
 .vscode/settings.json
+
+# ──────────────────────────────────────────────────────────
+# PM Workspace — agent session state & loop-me artifacts
+# 这些是本地工作产物，不属于 PM 平台源码，不进 git
+# ──────────────────────────────────────────────────────────
+
+# AI agent session/state directories (per-tool)
+.trae-cn/
+.trae/
+.omo/
+.codex/
+.claude/
+.opencode/
+.orgii/
+.workbuddy/
+.codebuddy/
+.codegraph/
+.specify/
+.agents/
+
+# Loop-me workspace artifacts
+NOTES.md
+workflows/
+HANDOFF*.md
+STATE.md
+LOOP.md
+loop-run-log.md
+loop-constraints.md
+loop-budget.md
+
+# Temp/junk files
+check_output.txt
+nul
+
+# Trellis workspace state (per-developer journals)
+.trellis/workspace/

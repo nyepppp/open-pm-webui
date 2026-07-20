@@ -12,9 +12,16 @@
 		updateActionStatus,
 		availableModels,
 		hasModels,
-		selectedModelId
+		selectedModelId,
+		fetchEntryForPreview,
+		executeConfirmedDelete,
+		pendingEventCall,
+		respondToEventCall
 	} from '$lib/stores/pm/agentChatStore';
 	import type { AgentAction, ModuleType } from '$lib/apis/pm/types';
+	import OperationPreviewModal, {
+		type OperationPreviewData
+	} from './agent/OperationPreviewModal.svelte';
 
 	interface Props {
 		isOpen?: boolean;
@@ -43,6 +50,13 @@
 	let inputMessage = $state('');
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let pendingConfirmAction = $state<AgentAction | null>(null);
+	// Bug 9 (v10): Pending operation for OperationPreviewModal.
+	// Set when AI's response contains `needs_confirmation: true` (from pm_entry_delete confirmed=False),
+	// or when a pm.entry.update/create/delete action arrives.
+	let pendingOperation = $state<OperationPreviewData | null>(null);
+	// Track which message IDs we've already processed for needs_confirmation,
+	// to avoid re-popping the modal on every $chatMessages update.
+	let processedNeedsConfirmIds = $state<Set<string>>(new Set());
 
 	// Sync context to store
 	$effect(() => {
@@ -59,6 +73,117 @@
 	onMount(() => {
 		refreshAgentStatus();
 	});
+
+	// Bug 9 (v10): Detect needs_confirmation in latest assistant message OR
+	// new pm.entry.update/create/delete pending action → show OperationPreviewModal.
+	$effect(() => {
+		const msgs = $chatMessages;
+		if (pendingOperation) return; // modal already open, skip
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			const msg = msgs[i];
+			if (msg.role !== 'assistant') continue;
+			if (processedNeedsConfirmIds.has(msg.id)) break; // already processed older message
+			processedNeedsConfirmIds.add(msg.id);
+
+			// Path 1: needs_confirmation in content (from pm_entry_delete confirmed=False)
+			if (msg.content && msg.content.includes('"needs_confirmation"')) {
+				try {
+					// Extract JSON block from content
+					const jsonMatch = msg.content.match(/\{[\s\S]*"needs_confirmation"[\s\S]*\}/);
+					if (jsonMatch) {
+						const parsed = JSON.parse(jsonMatch[0]);
+						if (parsed.needs_confirmation && parsed.entry_id) {
+							// Fetch full before state for diff (D94)
+							(async () => {
+								const before = await fetchEntryForPreview(parsed.entry_id);
+								pendingOperation = {
+									type: 'delete',
+									module_type: parsed.module_type || '',
+									entry_id: parsed.entry_id,
+									entry_title: parsed.entry_title,
+									before: before || undefined,
+									after: undefined,
+									is_dangerous: true,
+									message: parsed.message
+								};
+							})();
+							break;
+						}
+					}
+				} catch (err) {
+					console.error('[PMAgent] Failed to parse needs_confirmation:', err);
+				}
+			}
+
+			// Path 2: pending pm.entry.delete/update/create/confirm actions
+		const pendingWriteActions = (msg.actions || []).filter(
+			(a) =>
+				a.status === 'pending' &&
+				(a.type === 'pm.entry.delete' ||
+					a.type === 'pm.entry.update' ||
+					a.type === 'pm.entry.create' ||
+					a.type === 'pm.entry.confirm')
+		);
+		if (pendingWriteActions.length > 0) {
+			const action = pendingWriteActions[0];
+			// Bug 9 (v11): pm.entry.confirm → payload has needs_confirmation data from pm_entry_delete(confirmed=False)
+			let opType: 'create' | 'update' | 'delete';
+			let payload = (action.payload || {}) as Record<string, unknown>;
+			if (action.type === 'pm.entry.confirm') {
+				opType = 'delete';  // Currently only delete uses confirm flow
+				payload = {
+					entry_id: payload.entry_id,
+					entry_title: payload.entry_title,
+					module_type: payload.module_type,
+					content_preview: payload.content_preview
+				} as Record<string, unknown>;
+			} else if (action.type === 'pm.entry.create') {
+				opType = 'create';
+			} else if (action.type === 'pm.entry.update') {
+				opType = 'update';
+			} else {
+				opType = 'delete';
+			}
+			(async () => {
+				const before = opType !== 'create' && payload.entry_id
+					? await fetchEntryForPreview(String(payload.entry_id))
+					: null;
+				pendingOperation = {
+					type: opType,
+					module_type: String(payload.module_type || ''),
+					entry_id: payload.entry_id ? String(payload.entry_id) : undefined,
+					entry_title: payload.entry_title ? String(payload.entry_title) : action.label,
+					before: before || undefined,
+					after: (payload.after || payload.fields) as Record<string, unknown> | undefined,
+					is_dangerous: opType === 'delete',
+					message: action.description
+				};
+			})();
+			break;
+		}
+		break; // only check the most recent assistant message
+		}
+	});
+
+	async function handleConfirmOperation(op: OperationPreviewData) {
+		if (op.type === 'delete' && op.entry_id) {
+			// Execute the actual delete via REST API
+			const ok = await executeConfirmedDelete(op.entry_id);
+			if (!ok) {
+				console.error('[PMAgent] Delete failed for entry:', op.entry_id);
+			}
+		}
+		// For update/create: operation already executed on backend; just close modal.
+		pendingOperation = null;
+	}
+
+	function handleCancelOperation(_op: OperationPreviewData) {
+		// For delete: send a follow-up message so AI knows the user cancelled
+		if (_op.type === 'delete') {
+			sendMessage(`用户取消了删除条目「${_op.entry_title || _op.entry_id || ''}」的操作，请勿再次调用 pm_entry_delete。`);
+		}
+		pendingOperation = null;
+	}
 
 	// Auto-scroll to bottom on new messages
 	$effect(() => {
@@ -103,10 +228,43 @@
 		updateActionStatus(action.id, 'dismissed');
 	}
 
+	// ============================================================================
+	// event_call confirmation (Task 6.3 + Task 4: 2-phase delete)
+	// ============================================================================
+	// When backend emits `__event_call__` (e.g. pm_entry_delete with
+	// confirmed=False), the store sets pendingEventCall. We render a modal
+	// showing entry details (title, module_type, content preview, message)
+	// with "确认删除" / "取消" buttons. Clicking either calls
+	// respondToEventCall(confirmed) -> POST /agent/event-response, after
+	// which the backend re-invokes the tool with confirmed=true/false.
+	let eventCallBusy = $state(false);
+
+	async function handleConfirmEventCall() {
+		if (eventCallBusy) return;
+		eventCallBusy = true;
+		try {
+			await respondToEventCall(true);
+		} finally {
+			eventCallBusy = false;
+		}
+	}
+
+	async function handleCancelEventCall() {
+		if (eventCallBusy) return;
+		eventCallBusy = true;
+		try {
+			await respondToEventCall(false);
+		} finally {
+			eventCallBusy = false;
+		}
+	}
+
 	function getActionTypeLabel(type: string): string {
 		const labels: Record<string, string> = {
 			'pm.entry.create': '创建条目',
 			'pm.entry.update': '更新条目',
+			'pm.entry.delete': '删除条目',
+			'pm.entry.confirm': '确认删除',
 			'pm.relation.create': '创建关联',
 			'pm.version.create': '创建版本',
 			'pm.parameter.extract': '提取参数'
@@ -365,6 +523,118 @@
 				<div class="flex gap-2 justify-end">
 					<button class="px-3 py-1.5 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition" onclick={cancelApplyAction}>取消</button>
 					<button class="px-3 py-1.5 text-sm rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition" onclick={confirmApplyAction}>确认执行</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Bug 9 (v10): Operation Preview Modal with diff -->
+	<OperationPreviewModal
+		isOpen={pendingOperation !== null}
+		operation={pendingOperation}
+		onconfirm={handleConfirmOperation}
+		oncancel={handleCancelOperation}
+	/>
+
+	<!-- Task 6.3 + Task 4: __event_call__ confirmation modal (2-phase delete) -->
+	{#if $pendingEventCall}
+		<div
+			class="fixed inset-0 bg-gray-900 bg-opacity-60 overflow-y-auto h-full w-full z-[70]"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="pm-event-call-title"
+		>
+			<div class="flex items-center justify-center min-h-screen px-4 py-6">
+				<div
+					class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full border-2 border-red-300 dark:border-red-700 max-h-[90vh] flex flex-col"
+					role="document"
+				>
+					<!-- Header -->
+					<div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-red-100 dark:bg-red-900/30 rounded-t-lg">
+						<div class="flex items-center gap-3">
+							<div class="flex-shrink-0">
+								<svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+								</svg>
+							</div>
+							<h3 id="pm-event-call-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100">
+								确认删除条目
+							</h3>
+						</div>
+					</div>
+
+					<!-- Body -->
+					<div class="px-6 py-4 overflow-y-auto flex-1">
+						{#if $pendingEventCall.message}
+							<p class="text-sm text-gray-700 dark:text-gray-300 mb-4">{$pendingEventCall.message}</p>
+						{/if}
+
+						<!-- Entry details -->
+						<div class="bg-gray-100 dark:bg-gray-900/40 rounded-md p-3 text-sm space-y-1.5 mb-4">
+							{#if $pendingEventCall.entry_title}
+								<div class="flex justify-between gap-3">
+									<span class="text-gray-500 dark:text-gray-400 flex-shrink-0">条目标题:</span>
+									<span class="font-medium text-gray-900 dark:text-gray-100 text-right break-all">{$pendingEventCall.entry_title}</span>
+								</div>
+							{/if}
+							{#if $pendingEventCall.module_type}
+								<div class="flex justify-between gap-3">
+									<span class="text-gray-500 dark:text-gray-400 flex-shrink-0">模块类型:</span>
+									<span class="font-medium text-gray-900 dark:text-gray-100">{$pendingEventCall.module_type}</span>
+								</div>
+							{/if}
+							{#if $pendingEventCall.entry_id}
+								<div class="flex justify-between gap-3">
+									<span class="text-gray-500 dark:text-gray-400 flex-shrink-0">条目 ID:</span>
+									<span class="font-mono text-xs text-gray-600 dark:text-gray-300 break-all">{$pendingEventCall.entry_id}</span>
+								</div>
+							{/if}
+						</div>
+
+						<!-- Content preview -->
+						{#if $pendingEventCall.content_preview}
+							<div class="mb-4">
+								<h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+									内容摘要
+								</h4>
+								<div class="border border-gray-200 dark:border-gray-700 rounded-md p-2.5 bg-gray-50 dark:bg-gray-900/30">
+									<p class="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+										{$pendingEventCall.content_preview}
+									</p>
+								</div>
+							</div>
+						{/if}
+
+						<!-- Danger warning -->
+						<div class="p-3 bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md">
+							<p class="text-xs text-red-700 dark:text-red-300">
+								<strong>警告:</strong> 此操作不可撤销。删除的数据将无法恢复。
+								点击「确认删除」后，后端将真实执行删除操作。
+							</p>
+						</div>
+					</div>
+
+					<!-- Footer -->
+					<div class="px-6 py-4 bg-gray-50 dark:bg-gray-900/40 rounded-b-lg flex justify-end gap-3 border-t border-gray-200 dark:border-gray-700">
+						<button
+							class="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={handleCancelEventCall}
+							disabled={eventCallBusy}
+						>
+							取消
+						</button>
+						<button
+							class="px-4 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={handleConfirmEventCall}
+							disabled={eventCallBusy}
+						>
+							{#if eventCallBusy}
+								处理中...
+							{:else}
+								确认删除
+							{/if}
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { getEntryVersions, getEntryVersion } from '$lib/apis/pm/version';
 	import type { EntryVersion } from '$lib/apis/pm/types';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
+	import { computeDiff, type DiffLine } from '$lib/utils/pmDiff';
 
 	interface Props {
 		projectId: string;
@@ -18,15 +18,13 @@
 	let loading = $state(true);
 	let oldVersionId = $state<string>('');
 	let newVersionId = $state<string>('');
-	let oldContent = $state<string>('');
-	let newContent = $state<string>('');
 	let oldVersionNumber = $state<string>('');
 	let newVersionNumber = $state<string>('');
 	let comparing = $state(false);
 	let oldMetadata = $state<Record<string, unknown>>({});
 	let newMetadata = $state<Record<string, unknown>>({});
 	let metadataDiff = $state<{ field: string; old: unknown; new: unknown }[]>([]);
-	let diffLines = $state<{ type: string; oldNum: number; newNum: number; text: string }[]>([]);
+	let diffLines = $state<DiffLine[]>([]);
 
 	$effect(() => {
 		loadVersions();
@@ -62,12 +60,10 @@
 				getEntryVersion(projectId, entryId, oldVersionId),
 				getEntryVersion(projectId, entryId, newVersionId)
 			]);
-			oldContent = stripHtml(oldV.content || '');
-			newContent = stripHtml(newV.content || '');
 			oldVersionNumber = oldV.versionNumber ?? oldV.version_number ?? '';
 			newVersionNumber = newV.versionNumber ?? newV.version_number ?? '';
-			diffLines = computeDiff(oldContent, newContent);
-			
+			diffLines = computeDiff(oldV.content || '', newV.content || '');
+
 			// Compute metadata diff
 			oldMetadata = (oldV.entry_metadata || {}) as Record<string, unknown>;
 			newMetadata = (newV.entry_metadata || {}) as Record<string, unknown>;
@@ -77,71 +73,6 @@
 		} finally {
 			comparing = false;
 		}
-	}
-
-	function stripHtml(html: string): string {
-		try {
-			const div = document.createElement('div');
-			div.innerHTML = html;
-			return div.textContent || div.innerText || html;
-		} catch {
-			return html;
-		}
-	}
-
-	function computeDiff(oldText: string, newText: string) {
-		const oldLines = oldText.split('\n');
-		const newLines = newText.split('\n');
-		const result: { type: 'unchanged' | 'added' | 'removed'; oldNum: number; newNum: number; text: string }[] = [];
-
-		// Simple LCS-based diff
-		const m = oldLines.length;
-		const n = newLines.length;
-
-		// Build LCS table
-		const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-		for (let i = 1; i <= m; i++) {
-			for (let j = 1; j <= n; j++) {
-				if (oldLines[i - 1] === newLines[j - 1]) {
-					dp[i][j] = dp[i - 1][j - 1] + 1;
-				} else {
-					dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-				}
-			}
-		}
-
-		// Backtrack to produce diff
-		const raw: { type: 'unchanged' | 'added' | 'removed'; text: string }[] = [];
-		let i = m, j = n;
-		while (i > 0 || j > 0) {
-			if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-				raw.push({ type: 'unchanged', text: oldLines[i - 1] });
-				i--; j--;
-			} else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-				raw.push({ type: 'added', text: newLines[j - 1] });
-				j--;
-			} else {
-				raw.push({ type: 'removed', text: oldLines[i - 1] });
-				i--;
-			}
-		}
-		raw.reverse();
-
-		let oldNum = 0, newNum = 0;
-		for (const line of raw) {
-			if (line.type === 'unchanged') {
-				oldNum++; newNum++;
-				result.push({ type: 'unchanged', oldNum, newNum, text: line.text });
-			} else if (line.type === 'removed') {
-				oldNum++;
-				result.push({ type: 'removed', oldNum, newNum: 0, text: line.text });
-			} else {
-				newNum++;
-				result.push({ type: 'added', oldNum: 0, newNum, text: line.text });
-			}
-		}
-
-		return result;
 	}
 
 	function computeMetadataDiff(oldMeta: Record<string, unknown>, newMeta: Record<string, unknown>) {
@@ -238,11 +169,11 @@
 			</div>
 		{:else if diffLines.length > 0}
 			<div class="font-mono text-xs leading-5">
-				{#each diffLines as line (`${line.type}-${line.oldNum}-${line.newNum}-${line.text}`)}
+				{#each diffLines as line (`${line.type}-${line.oldLineNo ?? 0}-${line.newLineNo ?? 0}-${line.content}`)}
 					<div class="flex {line.type === 'added' ? 'bg-green-50 dark:bg-green-900/20' : line.type === 'removed' ? 'bg-red-50 dark:bg-red-900/20' : ''}">
-						<span class="w-10 text-right pr-2 text-gray-400 select-none flex-shrink-0 {line.type === 'added' ? 'text-green-500' : line.type === 'removed' ? 'text-red-500' : ''}">{line.type === 'removed' ? line.oldNum : line.type === 'added' ? line.newNum : line.oldNum}</span>
+						<span class="w-10 text-right pr-2 text-gray-400 select-none flex-shrink-0 {line.type === 'added' ? 'text-green-500' : line.type === 'removed' ? 'text-red-500' : ''}">{line.type === 'removed' ? (line.oldLineNo ?? 0) : line.type === 'added' ? (line.newLineNo ?? 0) : (line.oldLineNo ?? 0)}</span>
 						<span class="w-5 text-center select-none flex-shrink-0 {line.type === 'added' ? 'text-green-600' : line.type === 'removed' ? 'text-red-600' : 'text-gray-300'}">{line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}</span>
-						<span class="flex-1 whitespace-pre-wrap break-all {line.type === 'added' ? 'text-green-800 dark:text-green-300' : line.type === 'removed' ? 'text-red-800 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'}">{line.text || ' '}</span>
+						<span class="flex-1 whitespace-pre-wrap break-all {line.type === 'added' ? 'text-green-800 dark:text-green-300' : line.type === 'removed' ? 'text-red-800 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'}">{line.content || ' '}</span>
 					</div>
 				{/each}
 			</div>

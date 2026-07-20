@@ -1,7 +1,7 @@
 """add pm tables
 
 Revision ID: f2e3d4c5b6a7
-Revises: f1e2d3c4b5a6
+Revises: 461111b60977
 Create Date: 2026-07-03 00:00:00.000000
 
 """

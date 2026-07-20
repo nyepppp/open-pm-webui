@@ -1,35 +1,63 @@
 {
   "schema_version": 2,
-  "active_work_id": "refactor-architecture-module-73f4b080",
+  "active_work_id": "fix-5-ui-bugs-73f4b080",
   "works": {
-    "refactor-architecture-module-73f4b080": {
-      "work_id": "refactor-architecture-module-73f4b080",
-      "active_plan": "D:\\project\\pm-workspace\\open-pm-webui\\.omo\\plans\\refactor-architecture-module.md",
-      "plan_name": "refactor-architecture-module",
+    "fix-5-ui-bugs-73f4b080": {
+      "work_id": "fix-5-ui-bugs-73f4b080",
+      "active_plan": "D:\\project\\pm-workspace\\open-pm-webui\\.omo\\plans\\fix-5-ui-bugs.md",
+      "plan_name": "fix-5-ui-bugs",
       "status": "active",
-      "started_at": "2026-07-06T13:00:19.267Z",
-      "updated_at": "2026-07-06T13:00:19.267Z",
+      "started_at": "2026-07-13T09:02:00.499Z",
+      "updated_at": "2026-07-13T13:15:04.571Z",
       "session_ids": [
-        "opencode:ses_0c89868acffeHaLXG7q0vjKASV"
+        "opencode:ses_0a56e4499ffet2v1LhOSRoVDO8"
       ],
       "session_origins": {
-        "opencode:ses_0c89868acffeHaLXG7q0vjKASV": "direct"
+        "opencode:ses_0a56e4499ffet2v1LhOSRoVDO8": "direct"
       },
-      "agent": "sisyphus",
-      "task_sessions": {}
+      "agent": "atlas",
+      "task_sessions": {
+        "todo:1": {
+          "task_key": "todo:1",
+          "task_label": "1",
+          "task_title": "修复工作流页面布局错乱",
+          "session_id": "opencode:ses_0a54729ccffeFtejMUZXwhRm50",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-07-13T13:15:04.571Z",
+          "started_at": "2026-07-13T09:12:41.537Z",
+          "status": "completed",
+          "ended_at": "2026-07-13T13:15:04.570Z",
+          "elapsed_ms": 14543033
+        }
+      }
     }
   },
-  "active_plan": "D:\\project\\pm-workspace\\open-pm-webui\\.omo\\plans\\refactor-architecture-module.md",
-  "started_at": "2026-07-06T13:00:19.267Z",
+  "active_plan": "D:\\project\\pm-workspace\\open-pm-webui\\.omo\\plans\\fix-5-ui-bugs.md",
+  "started_at": "2026-07-13T09:02:00.499Z",
   "status": "active",
-  "updated_at": "2026-07-06T13:00:19.267Z",
+  "updated_at": "2026-07-13T13:15:04.571Z",
   "session_ids": [
-    "opencode:ses_0c89868acffeHaLXG7q0vjKASV"
+    "opencode:ses_0a56e4499ffet2v1LhOSRoVDO8"
   ],
   "session_origins": {
-    "opencode:ses_0c89868acffeHaLXG7q0vjKASV": "direct"
+    "opencode:ses_0a56e4499ffet2v1LhOSRoVDO8": "direct"
   },
-  "plan_name": "refactor-architecture-module",
-  "task_sessions": {},
-  "agent": "sisyphus"
+  "plan_name": "fix-5-ui-bugs",
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "修复工作流页面布局错乱",
+      "session_id": "opencode:ses_0a54729ccffeFtejMUZXwhRm50",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-07-13T13:15:04.571Z",
+      "started_at": "2026-07-13T09:12:41.537Z",
+      "status": "completed",
+      "ended_at": "2026-07-13T13:15:04.570Z",
+      "elapsed_ms": 14543033
+    }
+  },
+  "agent": "atlas"
 }

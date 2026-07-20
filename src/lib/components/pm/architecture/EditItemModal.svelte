@@ -7,11 +7,13 @@
 		show: boolean;
 		type: 'module' | 'feature' | 'parameter';
 		data?: Partial<ArchModule> | Partial<ArchFeature> | Partial<ArchParameter>;
+		modules?: { id: string; name: string }[];
+		features?: { id: string; name: string }[];
 		onClose: () => void;
 		onSubmit: (data: any) => void;
 	}
 
-	let { show = false, type = 'module', data, onClose, onSubmit }: Props = $props();
+	let { show = false, type = 'module', data, modules = [], features = [], onClose, onSubmit }: Props = $props();
 
 	let formData = $state<Record<string, any>>({});
 	let isSubmitting = $state(false);
@@ -30,7 +32,7 @@
 			case 'feature':
 				return { name: '', description: '' };
 			case 'parameter':
-				return { name: '', key: '', type: 'config', dataType: 'string', defaultValue: '', required: false, description: '' };
+			return { name: '', key: '', type: 'config', dataType: 'string', defaultValue: '', required: false, description: '' };
 			default:
 				return {};
 		}
@@ -49,7 +51,10 @@
 
 		isSubmitting = true;
 		try {
-			onSubmit({ ...formData, type });
+			// 不把 prop type（实体类型 'module'|'feature'|'parameter'）传入 formData，
+			// 否则会覆盖用户在表单里选的 formData.type（参数类型 'input'|'output'|'config'）。
+			// 实体类型由调用方（ArchitectureTable handleEditSubmit）通过 editType 单独传递。
+			onSubmit({ ...formData });
 		} catch (e: any) {
 			toast.error(e.message || '保存失败');
 		} finally {
@@ -103,6 +108,17 @@
 
 		<!-- Form -->
 		<div class="space-y-4">
+			<!-- 归属信息（只读）：新增 feature/parameter 时显示父级上下文 -->
+			{#if type === 'feature' && formData?.moduleName}
+				<div class="px-3 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-sm text-blue-700 dark:text-blue-200">
+					归属模块：{formData.moduleName}
+				</div>
+			{:else if type === 'parameter' && formData?.moduleName}
+				<div class="px-3 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-sm text-blue-700 dark:text-blue-200">
+					归属模块：{formData.moduleName}{formData?.featureName ? ` / 功能：${formData.featureName}` : ''}
+				</div>
+			{/if}
+
 			<!-- Name -->
 			<div>
 				<label for="edit-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -140,10 +156,10 @@
 						参数类型
 					</label>
 					<select
-						id="edit-param-type"
-						class="w-full px-3 py-2 text-sm border rounded-lg border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-						bind:value={formData.type}
-					>
+					id="edit-param-type"
+					class="w-full px-3 py-2 text-sm border rounded-lg border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+					bind:value={formData.type}
+				>
 						{#each paramTypeOptions as option}
 							<option value={option.value}>{option.label}</option>
 						{/each}

@@ -60,6 +60,11 @@
 	import { getSessionUser } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
+	import { getWorkflows, getWorkflow, executeWorkflow, getExecutionStatus } from '$lib/apis/workflow';
+	import { getRoles, type RolePrompt } from '$lib/apis/prompts';
+	import { currentProject } from '$lib/stores/pm/projectStore';
+	import { chatWorkflowState } from '$lib/stores/chatWorkflowState';
+	import { getEntries as getPMEntries } from '$lib/apis/pm';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
@@ -105,6 +110,7 @@
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	import PMDataSelector from '../pm/PMDataSelector.svelte';
+	import WorkflowSelector from './WorkflowSelector.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -154,6 +160,13 @@
 	export let onQueueDelete: (id: string) => void = () => {};
 
 	export let chatTasks = [];
+
+	// Part B: 角色提示词
+	// 当前选中的角色（由父组件 Chat.svelte 通过 bind 双向绑定）
+	export let selectedRole: RolePrompt | null = null;
+	// 角色列表（在 onMount 时加载）
+	let roles: RolePrompt[] = [];
+	let showRoleMenu = false;
 
 	let inputContent = null;
 
@@ -546,6 +559,183 @@
 	let showPMWorkbenchButton = false;
 	$: showPMWorkbenchButton =
 		$config?.features?.enable_pm_workbench !== false;
+
+	let showWorkflowButton = false;
+	// Re-enabled: chat-scoped workflow execution reuses the existing
+	// POST /workflows/{id}/execute + GET status routes (real engine).
+	// Coexists with PM Workbench button — PM Workbench provides context
+	// (Agent CRUD on PM data), WorkflowSelector runs a fixed flow inline.
+	$: showWorkflowButton = workflows.length > 0;
+
+	let hasRealProject = false;
+	$: hasRealProject = $currentProject && $currentProject.id !== 'default';
+
+	// Workflow state
+	// D32: selectedWorkflowId / pinnedWorkflowIds 通过 store 跨 MessageInput 实例持久化，
+	// 解决 Chat.svelte {#if} 分支切换导致组件卸载重挂载时状态丢失的问题。
+	let workflows = [];
+	let selectedWorkflowId = '';
+	let pinnedWorkflowIds: string[] = [];
+	// 订阅 store：组件重挂载时从 store 恢复状态（store → 局部变量单向同步）
+	// L5: [Bug4-Diag] 标签 + 恢复日志，便于排查「发送后工作流被自动取消」
+	$: {
+		const newState = $chatWorkflowState;
+		const prevSelected = selectedWorkflowId;
+		selectedWorkflowId = newState.selectedWorkflowId;
+		pinnedWorkflowIds = newState.pinnedWorkflowIds;
+		if (prevSelected !== newState.selectedWorkflowId) {
+			console.log('[Bug4-Diag] store restored:', {
+				prevSelected,
+				selectedWorkflowId: newState.selectedWorkflowId,
+				pinnedWorkflowIds: newState.pinnedWorkflowIds,
+			});
+		}
+	}
+	let showWorkflowSelector = false;
+	let workflowExecuting = false;
+
+	// 写入时同时更新局部变量和 store（确保跨实例同步）
+	function setSelectedWorkflowId(id: string) {
+		selectedWorkflowId = id;
+		chatWorkflowState.update((s) => ({ ...s, selectedWorkflowId: id }));
+	}
+	function setPinnedWorkflowIds(ids: string[]) {
+		pinnedWorkflowIds = ids;
+		chatWorkflowState.update((s) => ({ ...s, pinnedWorkflowIds: ids }));
+	}
+
+	// Load workflows on mount
+	const loadWorkflows = async () => {
+		try {
+			workflows = await getWorkflows(localStorage.token);
+		} catch (e) {
+			console.error('Failed to load workflows:', e);
+		}
+	};
+
+	// Parse workflow command from prompt
+	const parseWorkflowCommand = (text: string): { workflowId: string | null; cleanText: string } => {
+		const match = text.match(/^\/workflow-([a-zA-Z0-9_-]+)\s*(.*)$/);
+		if (match) {
+			return { workflowId: match[1], cleanText: match[2] || '' };
+		}
+		return { workflowId: null, cleanText: text };
+	};
+
+	// D5: 选择工作流后不再自动执行，改为将工作流信息 + 项目条目摘要注入 prompt，
+	// 由 AI 在下一次发送时决定是否调用工作流（避免误触执行和 disconnected nodes 报错）。
+	const handleWorkflowSelect = async (workflowId: string) => {
+		// L4: 空 id 表示用户取消选择（点 × 按钮或反选同一工作流）
+		if (!workflowId) {
+			setSelectedWorkflowId('');
+			console.log('[Bug4-Diag] handleWorkflowSelect: cleared selection');
+			toast.info('已取消工作流选择');
+			return;
+		}
+		if (!$currentProject || $currentProject.id === 'default') {
+			toast.error('请先选择真实项目');
+			return;
+		}
+		setSelectedWorkflowId(workflowId);
+
+		const wf = workflows.find((w: any) => w.id === workflowId);
+		const wfName = wf?.name || workflowId;
+		const wfDesc = wf?.description || '';
+
+		const token = localStorage.token;
+		if (!token) {
+			toast.error('未登录');
+			return;
+		}
+
+		// D5: 注入工作流基础信息
+		let contextHint = `\n[已选择工作流「${wfName}」(id: ${workflowId})]`;
+		if (wfDesc) contextHint += `\n描述：${wfDesc}`;
+		contextHint += `\n项目上下文：${$currentProject.name}（id: ${$currentProject.id}）`;
+
+		// D12: 加载工作流定义，提取输入参数 schema 和节点摘要
+		try {
+			const wfDef = await getWorkflow(token, workflowId);
+			const nodes = wfDef?.nodes || [];
+			// 兼容 nodes 是字符串（JSON）或数组
+			const nodesArr: any[] = typeof nodes === 'string' ? safeJsonParse(nodes, []) : nodes;
+			const startNode = nodesArr.find((n: any) => n.type === 'start' || n.type === 'start_node');
+			const inputSchema =
+				startNode?.data?.inputs ||
+				startNode?.config?.inputs ||
+				startNode?.input_schema ||
+				[];
+			if (Array.isArray(inputSchema) && inputSchema.length > 0) {
+				contextHint += `\n工作流输入参数（必填项必须填入 inputs）：`;
+				for (const inp of inputSchema) {
+					const name = inp.name || inp.key || inp.id;
+					const type = inp.type || 'string';
+					const desc = inp.description || '';
+					const req = inp.required ? ' [必填]' : '';
+					contextHint += `\n- ${name}（${type}）${desc ? '：' + desc : ''}${req}`;
+				}
+			}
+			// 节点摘要（让 AI 知道工作流做什么）
+			const nodeSummary = nodesArr
+				.filter((n: any) => !['start', 'end', 'start_node', 'end_node'].includes(n.type))
+				.map((n: any) => `- ${n.type}：${n.data?.label || n.name || n.id}`)
+				.slice(0, 10)
+				.join('\n');
+			if (nodeSummary) {
+				contextHint += `\n工作流节点：\n${nodeSummary}`;
+			}
+		} catch (e) {
+			console.warn('[chat] load workflow def failed:', e);
+		}
+
+		// D5: 加载项目条目摘要（让 AI 能"在项目找到我要的文档"）
+		try {
+			const entries = await getPMEntries(token, $currentProject.id);
+			const list = Array.isArray(entries) ? entries.slice(0, 20) : [];
+			if (list.length > 0) {
+				const entriesSummary = list
+					.map((e: any) => `- ${e.title || '(无标题)'} [${e.module_type || 'unknown'}] (id: ${e.id})`)
+					.join('\n');
+				contextHint += `\n项目条目摘要（最多 20 条，可作为工作流输入的数据源）：\n${entriesSummary}`;
+			}
+		} catch (e) {
+			console.warn('[chat] load entries failed:', e);
+		}
+
+		// D16: 编排协议指令 — AI 决定执行时输出结构化 JSON
+		contextHint += `\n\n编排协议（重要）：`;
+		contextHint += `\n- 若用户的问题需要执行该工作流，请在回复中输出 JSON 块（用 \`\`\`json 包裹）：`;
+		contextHint += `\n  \`\`\`json`;
+		contextHint += `\n  {"action":"execute_workflow","workflow_id":"${workflowId}","inputs":{"参数名":"值"}}`;
+		contextHint += `\n  \`\`\``;
+		contextHint += `\n- inputs 必须填入所有必填参数；可从项目条目中提取内容作为参数值。`;
+		contextHint += `\n- JSON 块前后可有解释性文字（向用户说明你为什么决定执行该工作流、从哪里取了什么数据），但 JSON 必须是有效的单个对象。`;
+		contextHint += `\n- 若用户未明确要求执行工作流，或工作流不适合解决用户问题，正常回复即可，不要输出该 JSON。`;
+
+		prompt = prompt ? `${prompt}\n${contextHint}` : contextHint;
+		toast.info(`已选择工作流「${wfName}」，AI 将根据您的下一个问题决定是否执行`);
+	};
+
+	// 辅助函数：安全 JSON 解析（用于兼容 nodes 字段是字符串或数组）
+	function safeJsonParse<T>(s: string, fallback: T): T {
+		try {
+			return JSON.parse(s);
+		} catch (_) {
+			return fallback;
+		}
+	}
+
+	// Handle workflow pin
+	const handleWorkflowPin = (workflowId: string) => {
+		if (!pinnedWorkflowIds.includes(workflowId)) {
+			setPinnedWorkflowIds([...pinnedWorkflowIds, workflowId]);
+		}
+	};
+
+	// Handle workflow unpin
+	const handleWorkflowUnpin = (workflowId: string) => {
+		setPinnedWorkflowIds(pinnedWorkflowIds.filter(id => id !== workflowId));
+	};
 
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
@@ -940,7 +1130,50 @@
 		shiftKey = false;
 	};
 
+	// ===== Part B: 角色提示词 =====
+
+	// 加载当前用户可见的角色列表
+	const loadRoles = async () => {
+		try {
+			roles = await getRoles(localStorage.token);
+		} catch (err) {
+			console.error('Failed to load roles:', err);
+			roles = [];
+		}
+	};
+
+	// 选择角色：将角色的 tools 合并进 selectedToolIds，并通过事件通知父组件
+	// 更新 params.system。仅影响后续消息，历史消息不变（由父组件控制）。
+	const handleRoleSelect = (role: RolePrompt) => {
+		// 取消之前选中角色的工具（如果有的话），避免叠加
+		if (selectedRole && selectedRole.id !== role.id) {
+			const prevTools = selectedRole.tools || [];
+			selectedToolIds = selectedToolIds.filter((id) => !prevTools.includes(id));
+		}
+		// 合并新角色的工具（去重）
+		const newTools = role.tools || [];
+		selectedToolIds = [...new Set([...selectedToolIds, ...newTools])];
+		selectedRole = role;
+		showRoleMenu = false;
+		// 通知父组件（Chat.svelte）更新 params.system
+		dispatch('roleChange', role);
+	};
+
+	// 取消角色：移除该角色的工具，清空 params.system（通过事件）
+	const handleRoleClear = () => {
+		if (selectedRole) {
+			const prevTools = selectedRole.tools || [];
+			selectedToolIds = selectedToolIds.filter((id) => !prevTools.includes(id));
+		}
+		selectedRole = null;
+		showRoleMenu = false;
+		dispatch('roleChange', null);
+	};
+
 	onMount(() => {
+		// 加载角色提示词列表（用于角色选择器）
+		loadRoles();
+
 		suggestions = [
 			{
 				char: '@',
@@ -1135,6 +1368,7 @@
 
 			tools.set(await getTools(localStorage.token));
 			skills.set(await getSkills(localStorage.token));
+			await loadWorkflows();
 		};
 		initialize();
 
@@ -1170,10 +1404,10 @@
 	userValves={true}
 	type={selectedValvesType}
 	id={selectedValvesItemId ?? null}
-	on:save={async () => {
+	onsave={async () => {
 		await tick();
 	}}
-	on:close={() => {
+	onclose={() => {
 		integrationsMenuCloseOnOutsideClick = true;
 	}}
 />
@@ -1207,7 +1441,7 @@
 						>
 							<button
 								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
-								on:click={() => {
+								onclick={() => {
 									autoScroll = true;
 									scrollToBottom();
 								}}
@@ -1244,7 +1478,7 @@
 						type="file"
 						hidden
 						multiple
-						on:change={async () => {
+						onchange={async () => {
 							if (inputFiles && inputFiles.length > 0) {
 								const _inputFiles = Array.from(inputFiles);
 								inputFilesHandler(_inputFiles);
@@ -1282,16 +1516,17 @@
 						/>
 					</div>
 					<form
-						class="w-full flex flex-col gap-1.5 {recording ? 'hidden' : ''}"
-						on:submit|preventDefault={() => {
-							// check if selectedModels support image input
-							dispatch('submit', prompt);
-						}}
-					>
+					class="w-full flex flex-col gap-1.5 {recording ? 'hidden' : ''}"
+					onsubmit={(e) => {
+					e.preventDefault();
+					// check if selectedModels support image input
+					dispatch('submit', prompt);
+				}}
+				>
 						<button
 							id="generate-message-pair-button"
 							class="hidden"
-							on:click={() => createMessagePair(prompt)}
+							onclick={() => createMessagePair(prompt)}
 						/>
 
 						<!-- Task list display -->
@@ -1326,6 +1561,109 @@
 								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
+							<!-- Part B: 角色提示词选择器（顶部"当前角色：xxx"标签 + 下拉切换） -->
+							{#if selectedRole}
+								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
+									<div class="flex items-center justify-between w-full">
+										<div class="pl-[1px] flex items-center gap-2 text-sm dark:text-gray-500">
+											<svg class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+											</svg>
+											<div class="translate-y-[0.5px]">
+												<span class="text-gray-500">{$i18n.t('Role')}:</span>
+												<span class="ml-1 font-medium">{selectedRole.name}</span>
+												{#if selectedRole.tools && selectedRole.tools.length > 0}
+													<span class="ml-1 text-xs text-gray-400">({selectedRole.tools.length} tools)</span>
+												{/if}
+											</div>
+										</div>
+										<div class="flex items-center gap-1">
+											<!-- 切换角色按钮 -->
+											<div class="relative">
+												<button
+												class="flex items-center text-xs px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-gray-500 transition"
+												onclick={() => (showRoleMenu = !showRoleMenu)}
+												title={$i18n.t('Switch Role')}
+											>
+													<svg class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+													</svg>
+												</button>
+												{#if showRoleMenu}
+													<div
+														class="absolute right-0 top-full mt-1 z-50 min-w-[200px] max-h-[240px] overflow-y-auto rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-xl py-1"
+												onmouseleave={() => (showRoleMenu = false)}
+											>
+														{#each roles as r (r.id)}
+															<button
+																class="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 {r.id === selectedRole.id ? 'font-medium text-blue-600 dark:text-blue-400' : ''}"
+															onclick={() => handleRoleSelect(r)}
+															>
+																<div class="truncate">{r.name}</div>
+																{#if r.description}
+																	<div class="text-xs text-gray-400 truncate">{r.description}</div>
+																{/if}
+															</button>
+														{/each}
+														{#if roles.length === 0}
+															<div class="px-3 py-2 text-xs text-gray-400">无可用角色</div>
+														{/if}
+														<hr class="my-1 border-gray-100 dark:border-gray-800" />
+														<button
+															class="w-full text-left px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+														onclick={handleRoleClear}
+														>
+															{$i18n.t('Clear Role')}
+														</button>
+													</div>
+												{/if}
+											</div>
+											<!-- 取消角色按钮 -->
+											<button
+											class="flex items-center dark:text-gray-500"
+											onclick={handleRoleClear}
+											title={$i18n.t('Clear Role')}
+											>
+												<XMark />
+											</button>
+										</div>
+									</div>
+								</div>
+							{:else if roles.length > 0}
+								<!-- 未选角色时显示"选择角色"入口 -->
+								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
+									<div class="relative inline-block">
+										<button
+											class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+										onclick={() => (showRoleMenu = !showRoleMenu)}
+										>
+											<svg class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+											</svg>
+											{$i18n.t('Select Role')}
+										</button>
+										{#if showRoleMenu}
+											<div
+												class="absolute left-0 top-full mt-1 z-50 min-w-[200px] max-h-[240px] overflow-y-auto rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-xl py-1"
+											onmouseleave={() => (showRoleMenu = false)}
+										>
+												{#each roles as r (r.id)}
+													<button
+														class="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+													onclick={() => handleRoleSelect(r)}
+													>
+														<div class="truncate">{r.name}</div>
+														{#if r.description}
+															<div class="text-xs text-gray-400 truncate">{r.description}</div>
+														{/if}
+													</button>
+												{/each}
+											</div>
+										{/if}
+									</div>
+								</div>
+							{/if}
+
 							{#if atSelectedModel !== undefined}
 								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
 									<div class="flex items-center justify-between w-full">
@@ -1342,7 +1680,7 @@
 										<div>
 											<button
 												class="flex items-center dark:text-gray-500"
-												on:click={() => {
+												onclick={() => {
 													atSelectedModel = undefined;
 												}}
 											>
@@ -1404,7 +1742,7 @@
 															: 'outline-hidden focus:outline-hidden group-hover:visible invisible transition'}"
 														type="button"
 														aria-label={$i18n.t('Remove file')}
-														on:click={() => {
+														onclick={() => {
 															files.splice(fileIdx, 1);
 															files = files;
 														}}
@@ -1439,7 +1777,7 @@
 													files.splice(fileIdx, 1);
 													files = files;
 												}}
-												on:click={() => {
+												onclick={() => {
 													console.log(file);
 												}}
 											/>
@@ -1461,14 +1799,14 @@
 									{#if prompt.split('\n').length > 2}
 										<div class="fixed top-0 right-0 z-20">
 											<div class="mt-2.5 mr-3">
-												<button
-													type="button"
-													class="p-1 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50"
-													aria-label="Expand input"
-													on:click={async () => {
-														showInputModal = true;
-													}}
-												>
+											<button
+												type="button"
+												class="p-1 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50"
+												aria-label="Expand input"
+												onclick={async () => {
+													showInputModal = true;
+												}}
+											>
 													<Expand />
 												</button>
 											</div>
@@ -1488,7 +1826,7 @@
 														command = getCommand();
 													}}
 													json={true}
-													richText={$settings?.richTextInput ?? true}
+													richText={false}
 													messageInput={true}
 													showFormattingToolbar={$settings?.showFormattingToolbar ?? false}
 													floatingMenuPlacement={'top-start'}
@@ -1531,7 +1869,7 @@
 														compositionEndedAt = e.timeStamp;
 														isComposing = false;
 													}}
-													on:keydown={async (e) => {
+													onkeydown={async (e) => {
 														e = e.detail.event;
 
 														const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
@@ -1601,7 +1939,7 @@
 															codeInterpreterEnabled = false;
 														}
 													}}
-													on:paste={async (e) => {
+													onpaste={async (e) => {
 														e = e.detail.event;
 														console.log(e);
 
@@ -1742,33 +2080,56 @@
 												chatInput?.focus();
 											}}
 										>
-											<button
-												type="button"
-												id="integration-menu-button"
-												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-												aria-label={$i18n.t('Integrations')}
-											>
-												<Component className="size-4.5" strokeWidth="1.5" />
-										</button>
+										<button
+											type="button"
+											id="integration-menu-button"
+											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											aria-label={$i18n.t('Integrations')}
+											onclick={(e) => {
+												// Let the Dropdown component handle the toggle
+												// The Dropdown trigger action will handle the toggle
+											}}
+										>
+													<Component className="size-4.5" strokeWidth="1.5" />
+												</button>
 									</IntegrationsMenu>
 									
-									<!-- PM Workbench Button -->
-									{#if showPMWorkbenchButton}
-										<Tooltip content="PM Workbench" placement="top">
-											<button
-												type="button"
-												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-												aria-label="PM Workbench"
-												on:click={() => {
-													showPMDataSelector = true;
-												}}
-											>
-												<svg class="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-												</svg>
-											</button>
-											</Tooltip>
-										{/if}
+									<!-- Project Selector Badge -->
+									<Tooltip content={hasRealProject ? `当前项目: ${$currentProject?.name}` : '选择项目'} placement="top">
+										<button
+											type="button"
+											class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-sm {!hasRealProject ? 'border border-yellow-400/50' : ''}"
+											aria-label="选择项目"
+											onclick={() => {
+												showPMDataSelector = true;
+											}}
+										>
+											<svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5a2 2 0 012-2h4a2 2 0 012 2v2H8V5z" />
+											</svg>
+											<span class="text-gray-700 dark:text-gray-300 max-w-[120px] truncate">
+												{$currentProject?.name || '选择项目'}
+											</span>
+											{#if !hasRealProject}
+												<span class="text-xs text-yellow-500">未选择</span>
+											{/if}
+										</button>
+									</Tooltip>
+
+									<!-- Workflow Selector -->
+									{#if showWorkflowButton && workflows.length > 0}
+										<WorkflowSelector
+											{workflows}
+											{selectedWorkflowId}
+											{pinnedWorkflowIds}
+											requiredProjectId={hasRealProject ? $currentProject.id : null}
+											onSelect={handleWorkflowSelect}
+											onPin={handleWorkflowPin}
+											onUnpin={handleWorkflowUnpin}
+										/>
+									{/if}
+								
 								{/if}
 
 								{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
@@ -1778,7 +2139,7 @@
 												type="button"
 												id="model-valves-button"
 												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-												on:click={() => {
+												onclick={() => {
 													selectedValvesType = 'function';
 													selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
 													showValvesModal = true;
@@ -1801,7 +2162,7 @@
 													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
 													aria-label="Available Tools"
 													type="button"
-													on:click={() => {
+													onclick={() => {
 														showTools = !showTools;
 													}}
 												>
@@ -1824,7 +2185,7 @@
 													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
 													aria-label="Available Skills"
 													type="button"
-													on:click={() => {
+													onclick={() => {
 														showSkills = !showSkills;
 													}}
 												>
@@ -1841,20 +2202,21 @@
 											{@const filter = toggleFilters.find((f) => f.id === filterId)}
 											{#if filter}
 												<Tooltip content={filter?.name} placement="top">
-													<button
-														on:click|preventDefault={() => {
-															if (
-																filter?.has_user_valves &&
-																($_user?.role === 'admin' ||
-																	($_user?.permissions?.chat?.valves ?? true))
-															) {
-																selectedValvesType = 'function';
-																selectedValvesItemId = filterId;
-																showValvesModal = true;
-															} else {
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
+											<button
+												onclick={(e) => {
+													e.preventDefault();
+													if (
+														filter?.has_user_valves &&
+														($_user?.role === 'admin' ||
+															($_user?.permissions?.chat?.valves ?? true))
+													) {
+														selectedValvesType = 'function';
+														selectedValvesItemId = filterId;
+														showValvesModal = true;
+													} else {
+														selectedFilterIds = selectedFilterIds.filter(
+															(id) => id !== filterId
+														);
 															}
 														}}
 														type="button"
@@ -1880,16 +2242,16 @@
 														{/if}
 														<!-- svelte-ignore a11y-click-events-have-key-events -->
 														<!-- svelte-ignore a11y-no-static-element-interactions -->
-														<div
-															class="hidden group-hover:block"
-															on:click={(e) => {
-																e.stopPropagation();
-																e.preventDefault();
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
-															}}
-														>
+													<div
+														class="hidden group-hover:block"
+														onclick={(e) => {
+															e.stopPropagation();
+															e.preventDefault();
+															selectedFilterIds = selectedFilterIds.filter(
+																(id) => id !== filterId
+															);
+														}}
+													>
 															<XMark className="size-4" strokeWidth="1.75" />
 														</div>
 													</button>
@@ -1900,7 +2262,10 @@
 										{#if webSearchEnabled}
 											<Tooltip content={$i18n.t('Web Search')} placement="top">
 												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+													onclick={(e) => {
+														e.preventDefault();
+														webSearchEnabled = !webSearchEnabled;
+													}}
 													type="button"
 													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
 													($settings?.webSearch ?? false) === 'always'
@@ -1918,8 +2283,10 @@
 										{#if imageGenerationEnabled}
 											<Tooltip content={$i18n.t('Image')} placement="top">
 												<button
-													on:click|preventDefault={() =>
-														(imageGenerationEnabled = !imageGenerationEnabled)}
+													onclick={(e) => {
+														e.preventDefault();
+														imageGenerationEnabled = !imageGenerationEnabled;
+													}}
 													type="button"
 													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
 														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
@@ -1940,9 +2307,11 @@
 														? $i18n.t('Disable Code Interpreter')
 														: $i18n.t('Enable Code Interpreter')}
 													aria-pressed={codeInterpreterEnabled}
-													on:click|preventDefault={() =>
-														(codeInterpreterEnabled = !codeInterpreterEnabled)}
-													type="button"
+													onclick={(e) => {
+															e.preventDefault();
+															codeInterpreterEnabled = !codeInterpreterEnabled;
+														}}
+														type="button"
 													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
 														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
 														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
@@ -1961,16 +2330,17 @@
 
 										{#each pendingOAuthTools as pendingTool (pendingTool.id)}
 											<Tooltip content={$i18n.t('Click to connect')} placement="top">
-												<button
-													on:click|preventDefault={() => {
-														sessionStorage.setItem('pendingOAuthToolId', pendingTool.id);
-														const authUrl = getOAuthClientAuthorizationUrl(
-															pendingTool.serverId,
-															pendingTool.authType ?? 'mcp'
-														);
-														window.open(authUrl, '_self', 'noopener');
-													}}
-													type="button"
+											<button
+													onclick={(e) => {
+															e.preventDefault();
+															sessionStorage.setItem('pendingOAuthToolId', pendingTool.id);
+															const authUrl = getOAuthClientAuthorizationUrl(
+																pendingTool.serverId,
+																pendingTool.authType ?? 'mcp'
+															);
+															window.open(authUrl, '_self', 'noopener');
+														}}
+														type="button"
 													class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden
 														text-amber-600 dark:text-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-400/10 dark:hover:bg-amber-600/10 border border-amber-200/40 dark:border-amber-500/20"
 												>
@@ -1988,7 +2358,7 @@
 											<Tooltip content={$i18n.t('Stop')}>
 												<button
 													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
-													on:click={() => {
+													onclick={() => {
 														stopResponse();
 													}}
 												>
@@ -2016,7 +2386,7 @@
 													class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
 													type="button"
 													disabled={prompt === '' && files.length === 0}
-													on:click={() => {
+													onclick={() => {
 														createNote();
 													}}
 												>
@@ -2041,21 +2411,21 @@
 														id="voice-input-button"
 														class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 self-center mr-0.5"
 														type="button"
-														on:click={async () => {
-															try {
-																let stream = await navigator.mediaDevices
-																	.getUserMedia({ audio: true })
-																	.catch(function (err) {
-																		toast.error(
-																			$i18n.t(
-																				`Permission denied when accessing microphone: {{error}}`,
-																				{
-																					error: err
-																				}
-																			)
-																		);
-																		return null;
-																	});
+															onclick={async () => {
+																try {
+																	let stream = await navigator.mediaDevices
+																			.getUserMedia({ audio: true })
+																			.catch(function (err) {
+																				toast.error(
+																					$i18n.t(
+																							`Permission denied when accessing microphone: {{error}}`,
+																							{
+																								error: err
+																							}
+																						)
+																					);
+																					return null;
+																				});
 
 																if (stream) {
 																	recording = true;
@@ -2092,7 +2462,7 @@
 													<button
 														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-1.5 self-center"
 														type="button"
-														on:click={async () => {
+															onclick={async () => {
 															if (selectedModels.length > 1) {
 																toast.error($i18n.t('Select only one model to call'));
 
@@ -2205,18 +2575,25 @@
 <PMDataSelector
 	bind:show={showPMDataSelector}
 	onSelect={(data) => {
+		// Pure project selection — just set context, no file attachment
+		if (data.type === 'project-only') {
+			showPMDataSelector = false;
+			toast.success(`已选择项目: ${data.projectName || data.name || ''}`);
+			return;
+		}
+		// Entry selection — attach as file reference
 		const pmRef = {
-			id: `pm-${data.projectId}${data.id ? '-' + data.id : ''}`,
-			name: data.name,
-			type: data.type === 'pm-project' ? 'pm-project' : 'pm-entry',
+			id: `pm-${data.projectId || data.project_id}${data.entryId || data.id ? '-' + (data.entryId || data.id) : ''}`,
+			name: data.projectName || data.name || 'Untitled',
+			type: 'pm-entry',
 			status: 'processed',
-			url: `/pm/${data.projectId}`,
+			url: `/pm/${data.projectId || data.project_id}`,
 			data: {
-				projectId: data.projectId,
-				projectName: data.projectName,
-				entryId: data.id,
-				entryTitle: data.name,
-				moduleType: data.moduleType
+				projectId: data.projectId || data.project_id,
+				projectName: data.projectName || data.project_name,
+				entryId: data.entryId || data.id,
+				entryTitle: data.entryTitle || data.name,
+				moduleType: data.moduleType || data.module_type
 			}
 		};
 		if (!files.find((f) => f.id === pmRef.id)) {

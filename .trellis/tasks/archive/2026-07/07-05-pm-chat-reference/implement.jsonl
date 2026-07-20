@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend component conventions for MessageInput.svelte"}
-{"file": "src/lib/components/chat/MessageInput.svelte", "reason": "Core file — added PMDataSelector import, state variable, button, and component rendering at file end"}
-{"file": "src/lib/components/pm/PMDataSelector.svelte", "reason": "Existing selector component reused for PM data browsing and selection"}

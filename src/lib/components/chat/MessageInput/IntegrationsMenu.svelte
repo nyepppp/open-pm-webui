@@ -34,6 +34,7 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LinkSlash from '$lib/components/icons/LinkSlash.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
 
 	const i18n = getContext('i18n');
 

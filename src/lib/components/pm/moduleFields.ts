@@ -22,7 +22,8 @@ export const requirementFields: FieldConfig[] = [
 	{ name: 'userRole', label: '用户角色', type: 'text', placeholder: '目标用户角色' },
 	{ name: 'expectedBenefit', label: '预期收益', type: 'textarea', placeholder: '预期业务价值' },
 	{ name: 'relatedModules', label: '关联模块', type: 'multiselect', options: [] },
-	{ name: 'tags', label: '标签', type: 'text', placeholder: '用逗号分隔多个标签' }
+	{ name: 'tags', label: '标签', type: 'text', placeholder: '用逗号分隔多个标签' },
+	{ name: 'dueDate', label: '期望完成日期', type: 'date', placeholder: 'YYYY-MM-DD' }
 ];
 
 export const testcaseFields: FieldConfig[] = [
@@ -116,6 +117,13 @@ export const specFields: FieldConfig[] = [
 	{ name: 'relatedParameters', label: '关联参数', type: 'text', placeholder: '关联参数ID列表' }
 ];
 
+export const flowchartFields: FieldConfig[] = [
+	{ name: 'chartType', label: '流程图类型', type: 'select', options: ['bpmn', 'flowchart', 'swimlane', 'state-machine'] },
+	{ name: 'swimlanes', label: '泳道（逗号分隔）', type: 'text', placeholder: '用户,系统,审核员' },
+	{ name: 'relatedRequirements', label: '关联需求', type: 'text', placeholder: '关联需求ID列表' },
+	{ name: 'relatedParameters', label: '关联参数', type: 'text', placeholder: '关联参数ID列表' }
+];
+
 // ============================================================================
 // Module field registry - maps module type to its field configuration
 // ============================================================================
@@ -135,6 +143,7 @@ export const moduleFieldRegistry: Record<string, FieldConfig[]> = {
 	'product-architecture': productArchitectureFields,
 	'requirement-boundary': requirementBoundaryFields,
 	spec: specFields,
+	flowchart: flowchartFields,
 	architecture: [...productArchitectureFields, ...parameterFields],
 };
 
@@ -257,6 +266,13 @@ export const moduleEditorConfig: Record<string, ModuleEditorConfig> = {
 		label: 'SPEC规范',
 		icon: 'document',
 		category: 'review'
+	},
+	flowchart: {
+		editorType: 'mixed',
+		fields: flowchartFields,
+		label: '流程图',
+		icon: 'git-branch',
+		category: 'design'
 	},
 	architecture: {
 		editorType: 'mixed',

@@ -1,10 +1,11 @@
 import json
 import logging
+import io
 from typing import Optional
 from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from open_webui.internal.db import get_async_session
 from open_webui.models.pm import (
     PMEntries,
@@ -12,6 +13,10 @@ from open_webui.models.pm import (
     PMEntryForm,
     PMEntryModel,
     PMEntryUpdateForm,
+    PMModuleVersion,
+    PMModuleVersionModel,
+    PMModuleVersionForm,
+    PMModuleVersions,
     PMProjects,
     PMProjectForm,
     PMProjectModel,
@@ -21,10 +26,19 @@ from open_webui.models.pm import (
     PMVersionModel,
     PMRelation,
     PMRelationModel,
+    DuplicateProjectNameError,
 )
 from open_webui.utils.auth import get_verified_user
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# 复用 PM 导入导出 Tool 的扁平化/生成逻辑（这些方法不依赖 tool 的 HTTP 调用）
+from open_webui.tools.pm_import_export_tool import (
+    Tools as PMImportExportTool,
+    MODULE_DISPLAY_NAMES,
+    SUPPORTED_FORMATS,
+)
 
 
 class AgentChatRequest(BaseModel):
@@ -33,6 +47,9 @@ class AgentChatRequest(BaseModel):
     module_type: Optional[str] = None
     entry_id: Optional[str] = None
     context: Optional[dict] = None
+    # v15: session_id enables __event_emitter__ + __event_call__ for streaming
+    # and 2-phase delete confirmation via standard chat loop protocol.
+    session_id: Optional[str] = None
 
 
 class AgentSkillRequest(BaseModel):
@@ -68,6 +85,9 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# PM Relation 类型白名单（与 PMRelation.relation_type 注释对齐，新增 traceable_to 用于流程图绑定）
+ALLOWED_RELATION_TYPES = {'contains', 'references', 'derives', 'modifies', 'conflicts', 'traceable_to'}
+
 
 ############################
 # Projects
@@ -76,10 +96,11 @@ router = APIRouter()
 
 @router.get('/projects', response_model=list[PMProjectModel])
 async def get_projects(
+    include_archived: bool = False,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    return await PMProjects.get_projects_by_user_id(user.id, db=db)
+    return await PMProjects.get_projects_by_user_id(user.id, db=db, include_archived=include_archived)
 
 
 @router.post('/projects', response_model=PMProjectModel)
@@ -88,9 +109,73 @@ async def create_project(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    project = await PMProjects.insert_new_project(user.id, form_data, db=db)
+    try:
+        project = await PMProjects.insert_new_project(user.id, form_data, db=db)
+    except DuplicateProjectNameError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
     if not project:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to create project')
+
+    # D28: 自动创建初始项目版本 v1，让 versions 页面不再显示「0 个版本」空状态。
+    # D39: 异常可见化 —— 拆分异常类型，DB 错误用 error 级别日志；区分「版本创建失败」与「版本已创建但项目未关联」。
+    # K3: 日志加 [Bug2-Diag] 标签 + user_id + form_data dump，便于跨 Bug 检索。
+    # 失败时不阻断项目创建（保持 D28 设计意图），前端 versions 页面有兜底自动补建（A2）。
+    initial_version_form = PMVersionForm(
+        project_id=project.id,
+        version_number='v1',
+        description='初始版本',
+    )
+    initial_version = None
+    try:
+        initial_version = await PMVersions.insert_new_version(initial_version_form, user.id, db=db)
+    except SQLAlchemyError as e:
+        log.error(
+            '[Bug2-Diag] D28 DB error creating initial version: project_id=%s user_id=%s form=%s err=%s',
+            project.id, user.id, initial_version_form.model_dump(), e,
+            exc_info=True,
+        )
+    except ValueError as e:
+        log.error(
+            '[Bug2-Diag] D28 invalid form data creating initial version: project_id=%s user_id=%s form=%s err=%s',
+            project.id, user.id, initial_version_form.model_dump(), e,
+            exc_info=True,
+        )
+    except Exception as e:
+        log.error(
+            '[Bug2-Diag] D28 unexpected error creating initial version: project_id=%s user_id=%s form=%s err=%s',
+            project.id, user.id, initial_version_form.model_dump(), e,
+            exc_info=True,
+        )
+
+    if initial_version:
+        # 把初始版本设为项目的当前激活版本，避免后续读取 current_version_id 为空
+        try:
+            await PMProjects.update_project_by_id(
+                project.id,
+                PMProjectUpdateForm(current_version_id=initial_version.id),
+                db=db,
+            )
+            log.info(
+                '[Bug2-Diag] D28 auto-created initial version v1: project_id=%s user_id=%s version_id=%s',
+                project.id, user.id, initial_version.id,
+            )
+        except SQLAlchemyError as e:
+            # 版本已创建但项目未关联 —— 数据不一致，需运维介入
+            log.warning(
+                '[Bug2-Diag] D28 version %s created for project %s but failed to link: user_id=%s err=%s',
+                initial_version.id, project.id, user.id, e,
+                exc_info=True,
+            )
+        except Exception as e:
+            log.warning(
+                '[Bug2-Diag] D28 version %s created for project %s but failed to link: user_id=%s err=%s',
+                initial_version.id, project.id, user.id, e,
+                exc_info=True,
+            )
+
     return project
 
 
@@ -113,7 +198,13 @@ async def update_project(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    project = await PMProjects.update_project_by_id(project_id, form_data, db=db)
+    try:
+        project = await PMProjects.update_project_by_id(project_id, form_data, db=db)
+    except DuplicateProjectNameError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
     return project
@@ -127,6 +218,43 @@ async def delete_project(
 ):
     await PMProjects.delete_project_by_id(project_id, db=db)
     return True
+
+
+class ProjectCurrentVersionForm(BaseModel):
+    """切换项目当前激活版本的请求体。"""
+    version_id: str
+
+
+@router.put('/projects/{project_id}/current-version', response_model=dict)
+async def set_project_current_version(
+    project_id: str,
+    form_data: ProjectCurrentVersionForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """设置项目当前激活的项目版本（pm_version.id）。
+
+    校验：
+    - 项目存在且属于当前用户
+    - 指定的 version_id 属于该项目
+    """
+    project = await PMProjects.get_project_by_id(project_id, db=db)
+    if not project or project.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
+
+    version = await PMVersions.get_version_by_id(form_data.version_id, db=db)
+    if not version or version.project_id != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Version does not belong to this project',
+        )
+
+    update_form = PMProjectUpdateForm(current_version_id=form_data.version_id)
+    await PMProjects.update_project_by_id(project_id, update_form, db=db)
+    return {
+        'current_version_id': form_data.version_id,
+        'version_number': version.version_number,
+    }
 
 
 ############################
@@ -204,6 +332,207 @@ async def get_entries(
     return result
 
 
+async def _export_module_core(
+    project_id: str,
+    module_type: str,
+    format: str,
+    version_id: Optional[str],
+    columns: Optional[list],
+    entry_ids_filter: Optional[set],
+    db: AsyncSession,
+) -> StreamingResponse:
+    """导出核心逻辑：GET 与 POST 端点共用。
+
+    抽取为内部函数，避免 GET 端点（query 参数）与 POST 端点（JSON body）的参数解析逻辑重复。
+    """
+    if format not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的格式: {format}，支持: {SUPPORTED_FORMATS}",
+        )
+
+    # relation 模块走单独接口，本端点暂不支持（用户可通过对话入口触发 tool）
+    if module_type in ('relation', 'relations'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='relation 模块请通过对话入口调用导出工具',
+        )
+
+    # 查 entries（按 module_type 过滤；version_id 暂不参与过滤，保持与 get_entries 行为一致）
+    query = select(PMEntry).where(PMEntry.project_id == project_id)
+    if module_type:
+        query = query.where(PMEntry.module_type == module_type)
+    query = query.order_by(PMEntry.updated_at.desc())
+    result_rows = (await db.execute(query)).scalars().all()
+
+    # 按 entry_ids 过滤（若提供）
+    if entry_ids_filter:
+        result_rows = [e for e in result_rows if str(e.id) in entry_ids_filter]
+
+    # 转 dict（_entry_to_row 需要 dict 输入）
+    entries_dicts = []
+    for entry in result_rows:
+        entry_model = PMEntryModel.model_validate(entry)
+        entries_dicts.append(entry_model.model_dump(mode='json'))
+
+    if not entries_dicts:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"项目 {project_id} 的「{MODULE_DISPLAY_NAMES.get(module_type, module_type)}」模块没有条目可导出",
+        )
+
+    # 复用 tool 的扁平化与子类型拆分逻辑（透传 columns 控制列顺序）
+    tool = PMImportExportTool()
+    sheets = tool._split_entries_by_subtype(entries_dicts, module_type, columns)
+
+    display_name = MODULE_DISPLAY_NAMES.get(module_type, module_type)
+    filename_base = f"{module_type}_{project_id[:8] if project_id else 'unknown'}"
+
+    if format == 'xlsx':
+        content_bytes = tool._generate_xlsx_bytes(sheets, columns=columns)
+        filename = f"{display_name}_{filename_base}.xlsx"
+        media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    elif format == 'csv':
+        if len(sheets) == 1:
+            single_rows = next(iter(sheets.values()))
+            content_bytes = tool._generate_csv_string(single_rows, columns=columns).encode('utf-8')
+            filename = f"{display_name}_{filename_base}.csv"
+            media_type = 'text/csv'
+        else:
+            content_bytes = tool._generate_csv_zip_bytes(sheets, columns=columns)
+            filename = f"{display_name}_{filename_base}.zip"
+            media_type = 'application/zip'
+    elif format == 'markdown':
+        content_bytes = tool._generate_markdown_bytes(sheets, module_type, columns=columns)
+        filename = f"{display_name}_{filename_base}.md"
+        media_type = 'text/markdown'
+    elif format == 'docx':
+        try:
+            content_bytes = tool._generate_docx_bytes(sheets, module_type, columns=columns)
+        except ImportError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            )
+        filename = f"{display_name}_{filename_base}.docx"
+        media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    else:  # json
+        meta = {
+            'project_id': project_id,
+            'module_type': module_type,
+            'display_name': display_name,
+            'total_entries': len(entries_dicts),
+            'sheets': {k: len(v) for k, v in sheets.items()},
+        }
+        content_bytes = tool._generate_json_bytes(sheets, meta=meta)
+        filename = f"{display_name}_{filename_base}.json"
+        media_type = 'application/json'
+
+    # 用 URL-encoded 文件名支持中文
+    from urllib.parse import quote
+    quoted_filename = quote(filename)
+
+    return StreamingResponse(
+        io.BytesIO(content_bytes),
+        media_type=media_type,
+        headers={
+            'Content-Disposition': f"attachment; filename*=UTF-8''{quoted_filename}",
+        },
+    )
+
+
+@router.get('/projects/{project_id}/modules/{module_type}/export')
+async def export_module(
+    project_id: str,
+    module_type: str,
+    format: str = 'xlsx',
+    version_id: Optional[str] = None,
+    columns_json: Optional[str] = None,
+    entry_ids_json: Optional[str] = None,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """按模块批量导出 entries 为 xlsx/csv/json/markdown/docx 文件流（GET，向后兼容）。
+
+    复用 PMImportExportTool 的扁平化与生成逻辑（_entry_to_row / _split_entries_by_subtype /
+    _generate_xlsx_bytes / _generate_markdown_bytes / _generate_docx_bytes 等），
+    但不走 tool 的 HTTP 上传流程，直接返回文件流。
+
+    :param columns_json: 可选，JSON 字符串数组，形如
+        [{"key": "title", "label": "标题"}, {"key": "data.priority", "label": "优先级"}]。
+        控制导出列顺序与表头标签；为 None 时使用默认列。
+    :param entry_ids_json: 可选，JSON 字符串数组，形如 ["id1", "id2"]。
+        仅导出指定 ID 的条目；为 None 时导出全部。
+
+    注意：GET 受 URL 长度限制（8K-32K），条目 ID 列表过长时浏览器会抛
+    "Failed to fetch"。请优先使用 POST 同路径端点。
+    """
+    # 解析 columns_json
+    columns: Optional[list] = None
+    if columns_json:
+        try:
+            parsed = json.loads(columns_json)
+            if isinstance(parsed, list):
+                columns = parsed
+        except Exception as e:
+            log.warning(f'export_module: invalid columns_json: {e}')
+
+    # 解析 entry_ids_json
+    entry_ids_filter: Optional[set] = None
+    if entry_ids_json:
+        try:
+            ids_list = json.loads(entry_ids_json)
+            if isinstance(ids_list, list) and len(ids_list) > 0:
+                entry_ids_filter = set(str(i) for i in ids_list)
+        except Exception as e:
+            log.warning(f'export_module: invalid entry_ids_json: {e}')
+
+    return await _export_module_core(
+        project_id, module_type, format, version_id, columns, entry_ids_filter, db
+    )
+
+
+class ExportModuleRequest(BaseModel):
+    """POST /export 请求体。
+
+    用 POST + JSON body 替代 GET + URL query，避免条目 ID 列表过长
+    触发浏览器 URL 长度限制导致 "Failed to fetch"。
+    """
+
+    format: str = 'xlsx'
+    version_id: Optional[str] = None
+    columns: Optional[list] = None
+    entry_ids: Optional[list[str]] = None
+
+
+@router.post('/projects/{project_id}/modules/{module_type}/export')
+async def export_module_post(
+    project_id: str,
+    module_type: str,
+    body: ExportModuleRequest,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """按模块批量导出（POST，推荐）。
+
+    与 GET 端点功能等价，参数改为 JSON body 传输：
+    - format: xlsx / csv / json / markdown / docx
+    - version_id: 可选，版本 ID
+    - columns: 可选，列定义数组 [{"key": "title", "label": "标题"}]
+    - entry_ids: 可选，条目 ID 数组 ["id1", "id2"]
+
+    优势：无 URL 长度限制，适合大量条目筛选场景。
+    """
+    columns = body.columns if isinstance(body.columns, list) else None
+    entry_ids_filter: Optional[set] = None
+    if body.entry_ids and isinstance(body.entry_ids, list) and len(body.entry_ids) > 0:
+        entry_ids_filter = set(str(i) for i in body.entry_ids)
+
+    return await _export_module_core(
+        project_id, module_type, body.format, body.version_id, columns, entry_ids_filter, db
+    )
+
+
 @router.get('/projects/{project_id}/entries/search', response_model=list[PMEntryModel])
 async def search_entries(
     project_id: str,
@@ -249,10 +578,57 @@ async def create_entry(
     db: AsyncSession = Depends(get_async_session),
 ):
     form_data.project_id = project_id
+
+    # 自动填充 project_version_id：若前端未显式传入，则取项目当前激活版本
+    if not form_data.project_version_id:
+        project = await PMProjects.get_project_by_id(project_id, db=db)
+        if project and getattr(project, 'current_version_id', None):
+            form_data.project_version_id = project.current_version_id
+
+    # 若仍无 project_version_id，尝试从 data.versionId 回填
+    # （覆盖项目尚未设置 current_version_id 但前端已写入 data.versionId 的场景）
+    if not form_data.project_version_id and form_data.data:
+        data_vid = form_data.data.get('versionId')
+        if isinstance(data_vid, str) and data_vid:
+            form_data.project_version_id = data_vid
+
+    # 同步写入 data.versionId 以兼容前端旧代码（前端仍从 data.versionId 读取展示）
+    if form_data.project_version_id:
+        form_data.data = form_data.data or {}
+        form_data.data['versionId'] = form_data.project_version_id
+
+    # 功能/参数级自动绑定 module_version_id：
+    # 从 data.moduleId 反查父模块 entry 的 module_version_id，回填到 form_data。
+    # 满足用户需求"每次新建自动关联上对应版本"。
+    if form_data.module_type == 'product-architecture' and not form_data.module_version_id:
+        data_dict = form_data.data or {}
+        entry_type = data_dict.get('type')
+        if entry_type in ('feature', 'parameter'):
+            parent_module_id = data_dict.get('moduleId') or data_dict.get('module_entry_id')
+            if parent_module_id:
+                try:
+                    parent_result = await db.execute(
+                        select(PMEntry).where(PMEntry.id == parent_module_id)
+                    )
+                    parent_entry = parent_result.scalar_one_or_none()
+                    if parent_entry and parent_entry.module_version_id:
+                        form_data.module_version_id = parent_entry.module_version_id
+                except Exception as e:
+                    log.warning(
+                        f'create_entry: failed to inherit module_version_id from parent {parent_module_id}: {e}'
+                    )
+
     entry = await PMEntries.insert_new_entry(user.id, form_data, db=db)
     if not entry:
+        # 记录日志便于排查：PMEntries.insert_new_entry 返回 None 表示创建失败
+        log.error(f'create_entry: insert_new_entry returned None for project_id={project_id}, title={form_data.title}, module_type={form_data.module_type}')
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to create entry')
-    
+
+    # 加固契约：响应体必须含 id 字段，否则前端无法回填虚拟 ID
+    if not getattr(entry, 'id', None):
+        log.error(f'create_entry: entry has no id after insert, project_id={project_id}, title={form_data.title}')
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Created entry is missing id field')
+
     # Auto-create entity for traceability
     try:
         from open_webui.models.pm import PMEntities, PMEntityForm
@@ -283,12 +659,38 @@ async def create_entry(
         )
         await PMEntryVersions.insert_new_version(user.id, version_form, db=db)
     except Exception as e:
-        log.warning(f'Failed to auto-create entry version for entry {entry.id}: {e}')
+        log.error(f'Failed to auto-create entry version for entry {entry.id}: {e}', exc_info=True)
+
+    # 若是模块条目（module_type='product-architecture' 且 data.type='module'），
+    # 自动创建 PMModuleVersion v1 并回填 entry.module_version_id。
+    # 注意：这与 PMEntryVersion（条目级修订）和 PMVersion（项目版本）是三个独立的概念。
+    if form_data.module_type == 'product-architecture' and (form_data.data or {}).get('type') == 'module':
+        try:
+            module_version_form = PMModuleVersionForm(
+                module_entry_id=entry.id,
+                version_number='v1',
+                change_summary='Initial module version',
+                project_id=project_id,
+                project_version_id=form_data.project_version_id,
+            )
+            new_module_version = await PMModuleVersions.insert_new_version(user.id, module_version_form, db=db)
+            if new_module_version:
+                await db.execute(
+                    update(PMEntry)
+                    .where(PMEntry.id == entry.id)
+                    .values(module_version_id=new_module_version.id)
+                )
+                await db.commit()
+                # 同步到响应对象
+                entry.module_version_id = new_module_version.id
+        except Exception as e:
+            log.error(f'Failed to auto-create module version for entry {entry.id}: {e}', exc_info=True)
 
     # Enrich response with version info
     entry_response = PMEntryModel.model_validate(entry)
     entry_response.current_version_number = 'v1'
     entry_response.branch_name = 'main'
+    entry_response.created_version_number = entry_response.created_version_number or 'v1'
     return entry_response
 
 
@@ -322,6 +724,32 @@ async def update_entry(
     project = await PMProjects.get_project_by_id(entry.project_id, db=db)
     if not project or project.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+
+    # 补绑 module_version_id：处理历史数据（在 create_entry 自动绑定修复前创建的
+    # 功能/参数 entry 没有绑定 module_version_id），在用户修改时反查父模块当前版本回填。
+    # 只在 entry.module_version_id 为 None 且 form_data 未显式传入时补绑。
+    if (
+        not entry.module_version_id
+        and not getattr(form_data, 'module_version_id', None)
+        and entry.module_type == 'product-architecture'
+    ):
+        data_dict = entry.data or {}
+        entry_type = data_dict.get('type')
+        if entry_type in ('feature', 'parameter'):
+            parent_module_id = data_dict.get('moduleId') or data_dict.get('module_entry_id')
+            if parent_module_id:
+                try:
+                    parent_result = await db.execute(
+                        select(PMEntry).where(PMEntry.id == parent_module_id)
+                    )
+                    parent_entry = parent_result.scalar_one_or_none()
+                    if parent_entry and parent_entry.module_version_id:
+                        form_data.module_version_id = parent_entry.module_version_id
+                except Exception as e:
+                    log.warning(
+                        f'update_entry: failed to backfill module_version_id for entry {entry_id}: {e}'
+                    )
+
     entry = await PMEntries.update_entry_by_id(entry_id, form_data, db=db)
     return entry
 
@@ -363,32 +791,91 @@ async def get_entry_versions(
 async def create_entry_version(
     project_id: str,
     entry_id: str,
-    form_data: dict,
+    form_data: dict = Body(...),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     from open_webui.models.pm import PMEntryVersions, PMEntryVersionForm
+    import time  # D22: 需要 time.time_ns() 取纳秒时间戳
     # Get current entry to snapshot
     entry = await PMEntries.get_entry_by_id(entry_id, db=db)
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Entry not found')
-    
-    # Auto-generate version number
+
+    # D20: 修复版本号碰撞 — 基于 MAX(version_number) 解析数字 +1
+    # 旧实现 `f'v{len(existing) + 1}'` 在删除历史版本后会与已有版本号碰撞
     existing = await PMEntryVersions.get_versions_by_entry_id(entry_id, db=db)
-    version_number = form_data.get('version_number') or f'v{len(existing) + 1}'
-    
+    if form_data.get('version_number'):
+        version_number = form_data['version_number']
+    else:
+        max_num = 0
+        for v in existing:
+            try:
+                # 兼容 'v1' / '1' / 'v1.0' 等格式
+                num_str = (v.version_number or '').lstrip('v').split('.')[0]
+                num = int(num_str) if num_str.isdigit() else 0
+                if num > max_num:
+                    max_num = num
+            except (ValueError, AttributeError):
+                continue
+        version_number = f'v{max_num + 1}'
+
+    # D21: 修复 parent_id — 自动填充上一版本 ID，建立版本链
+    # 旧实现从不传 parent_id，版本树断裂无法追溯
+    parent_id = form_data.get('parent_id')
+    if not parent_id and existing:
+        # 取 created_at 最新的版本作为父版本
+        sorted_existing = sorted(existing, key=lambda v: v.created_at or 0, reverse=True)
+        if sorted_existing:
+            parent_id = sorted_existing[0].id
+
+    # D22: 修复时间戳量纲 — 统一用 time.time_ns() 与 created_at 一致
+    # 旧实现用 int(time.time()) 秒级，与 models/pm.py 的 created_at 纳秒级不一致
     version_form = PMEntryVersionForm(
         entry_id=entry_id,
         project_id=project_id,
         module_type=entry.module_type,
         version_number=version_number,
         content=entry.content,
-        entry_metadata=entry.data,
+        entry_metadata={
+            'data_snapshot': entry.data,          # 完整 data JSON 副本
+            'snapshot_at': int(time.time_ns()),    # 快照时间戳（纳秒，与 created_at 一致）
+        },
+        parent_id=parent_id,
         branch_name=form_data.get('branch_name', 'main'),
         change_summary=form_data.get('change_summary', ''),
         project_version_id=form_data.get('project_version_id'),
     )
-    version = await PMEntryVersions.insert_new_version(user.id, version_form, db=db)
+    # K1d: 包裹 insert_new_version —— DB 异常不再静默冒泡为 500，记录 [Bug1-Diag] 后 re-raise
+    try:
+        version = await PMEntryVersions.insert_new_version(user.id, version_form, db=db)
+    except SQLAlchemyError as e:
+        log.exception(
+            '[Bug1-Diag] create_entry_version DB error: entry_id=%s project_id=%s version_number=%s',
+            entry_id, project_id, version_number,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'DB error creating entry version: {e}',
+        ) from e
+    except Exception as e:
+        log.exception(
+            '[Bug1-Diag] create_entry_version unexpected error: entry_id=%s project_id=%s version_number=%s',
+            entry_id, project_id, version_number,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'Unexpected error creating entry version: {e}',
+        ) from e
+    if not version:
+        log.error(
+            '[Bug1-Diag] create_entry_version returned None: entry_id=%s project_id=%s version_number=%s',
+            entry_id, project_id, version_number,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Failed to create entry version (insert returned None)',
+        )
     return version
 
 
@@ -419,11 +906,18 @@ async def switch_entry_version(
     version = await PMEntryVersions.get_version_by_id(version_id, db=db)
     if not version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Version not found')
-    
+
+    # 向后兼容：新格式 entry_metadata={'data_snapshot': ..., 'snapshot_at': ...}；旧格式直接是 data
+    metadata = version.entry_metadata
+    if isinstance(metadata, dict) and 'data_snapshot' in metadata:
+        data_to_restore = metadata.get('data_snapshot')
+    else:
+        data_to_restore = metadata
+
     # Restore entry content from version
     await PMEntries.update_entry_by_id(
         entry_id,
-        PMEntryUpdateForm(content=version.content, data=version.entry_metadata),
+        PMEntryUpdateForm(content=version.content, data=data_to_restore),
         db=db
     )
     return {'entry_id': entry_id, 'current_version_id': version_id}
@@ -1477,6 +1971,191 @@ FLOW_EXECUTORS = {
 }
 
 
+# ============================================================================
+# Module Versions — 产品架构模块多版本管理
+# 一个 module entry（module_type='product-architecture' 且 node_type='module'）
+# 可以有多个版本。module/feature/parameter entry 通过 module_version_id 绑定。
+# ============================================================================
+
+
+@router.post(
+    '/projects/{project_id}/modules/{module_entry_id}/versions',
+    response_model=PMModuleVersionModel,
+)
+async def create_module_version(
+    project_id: str,
+    module_entry_id: str,
+    form: PMModuleVersionForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """创建模块版本。version_number 由前端传，例如 'v1', 'v1.1'。
+
+    新建后自动切换为活动版本：把该模块下所有 entry 的 module_version_id
+    更新为新版本 ID。满足用户需求"每次新建自动关联上对应版本"。
+    """
+    if form.module_entry_id != module_entry_id:
+        raise HTTPException(status_code=400, detail='module_entry_id mismatch')
+    if not form.project_id:
+        form.project_id = project_id
+    elif form.project_id != project_id:
+        raise HTTPException(status_code=400, detail='project_id mismatch')
+    version = await PMModuleVersions.insert_new_version(user.id, form, db)
+    # 自动切换活动版本到新建版本
+    if version:
+        try:
+            await _apply_module_version_switch(project_id, module_entry_id, version.id, db)
+        except Exception as e:
+            log.warning(
+                f'create_module_version: auto-switch failed for version {version.id}: {e}'
+            )
+    return version
+
+
+async def _apply_module_version_switch(
+    project_id: str,
+    module_entry_id: str,
+    version_id: str,
+    db: AsyncSession,
+) -> list[str]:
+    """把指定模块下所有 entry 的 module_version_id 更新为 version_id。
+
+    匹配范围：module/feature/parameter entry 中 data.moduleId 或 data.parentId
+    等于 module_entry_id 的，全部更新 module_version_id。
+
+    抽取为内部函数供 create_module_version（自动切换）和 switch_module_version
+    （手动切换）共用，避免逻辑重复。
+    """
+    stmt = select(PMEntry).where(
+        PMEntry.project_id == project_id,
+        (PMEntry.module_type == 'product-architecture')
+        | (PMEntry.module_type == 'parameter'),
+    )
+    result = await db.execute(stmt)
+    all_entries = result.scalars().all()
+
+    updated_ids: list[str] = []
+    for entry in all_entries:
+        data = entry.data or {}
+        mid = data.get('moduleId') or data.get('module_entry_id')
+        pid = data.get('parentId')
+        if entry.id == module_entry_id:
+            should_update = True
+        elif mid == module_entry_id or pid == module_entry_id:
+            should_update = True
+        else:
+            should_update = False
+        if should_update:
+            await db.execute(
+                update(PMEntry)
+                .where(PMEntry.id == entry.id)
+                .values(module_version_id=version_id)
+            )
+            updated_ids.append(entry.id)
+
+    await db.commit()
+    return updated_ids
+
+
+@router.get(
+    '/projects/{project_id}/modules/{module_entry_id}/versions',
+    response_model=list[PMModuleVersionModel],
+)
+async def list_module_versions(
+    project_id: str,
+    module_entry_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """列出指定模块的所有版本，按 created_at 降序。"""
+    return await PMModuleVersions.get_versions_by_module_entry_id(module_entry_id, db)
+
+
+@router.post(
+    '/projects/{project_id}/modules/{module_entry_id}/versions/{version_id}/switch',
+    response_model=dict,
+)
+async def switch_module_version(
+    project_id: str,
+    module_entry_id: str,
+    version_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """切换当前模块版本：把该模块下所有 entry 的 module_version_id 更新为 version_id。
+
+    匹配范围：module/feature/parameter entry 中 data.moduleId 或 data.parentId
+    等于 module_entry_id 的，全部更新 module_version_id。
+    """
+    version = await PMModuleVersions.get_version_by_id(version_id, db)
+    if not version or version.module_entry_id != module_entry_id:
+        raise HTTPException(status_code=404, detail='Module version not found')
+    if version.project_id != project_id:
+        raise HTTPException(status_code=400, detail='project_id mismatch')
+
+    updated_ids = await _apply_module_version_switch(
+        project_id, module_entry_id, version_id, db
+    )
+    return {
+        'version_id': version_id,
+        'updated_entry_ids': updated_ids,
+        'count': len(updated_ids),
+    }
+
+
+@router.delete(
+    '/projects/{project_id}/modules/{module_entry_id}/versions/{version_id}',
+    response_model=bool,
+)
+async def delete_module_version(
+    project_id: str,
+    module_entry_id: str,
+    version_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """删除模块版本。删除前应确认没有 entry 仍绑定到此版本。"""
+    return await PMModuleVersions.delete_version_by_id(version_id, db)
+
+
+@router.get(
+    '/projects/{project_id}/modules/{module_entry_id}/versions/span',
+    response_model=dict,
+)
+async def get_module_version_span(
+    project_id: str,
+    module_entry_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """计算指定模块的版本跨度：该模块下所有 feature/parameter entry 出现过的不同 module_version_id 数量。
+
+    用于 UI 展示"版本跨度：X 个版本"，帮助用户理解一个功能/参数跨了多少个模块版本。
+    """
+    stmt = select(PMEntry).where(
+        PMEntry.project_id == project_id,
+        (PMEntry.module_type == 'product-architecture') | (PMEntry.module_type == 'parameter'),
+    )
+    result = await db.execute(stmt)
+    all_entries = result.scalars().all()
+
+    feature_versions: set = set()
+    parameter_versions: set = set()
+    for entry in all_entries:
+        data = entry.data or {}
+        mid = data.get('moduleId') or data.get('module_entry_id')
+        pid = data.get('parentId')
+        # 匹配：entry 自身是模块 / data.moduleId 指向模块 / data.parentId 指向模块
+        if entry.id == module_entry_id or mid == module_entry_id or pid == module_entry_id:
+            if entry.module_version_id:
+                node_type = data.get('node_type') or data.get('type')
+                if node_type == 'parameter' or entry.module_type == 'parameter':
+                    parameter_versions.add(entry.module_version_id)
+                else:
+                    feature_versions.add(entry.module_version_id)
+    return {'featureSpan': len(feature_versions), 'parameterSpan': len(parameter_versions)}
+
+
 @router.get('/flow/templates')
 async def list_flow_templates(
     project_id: Optional[str] = None,
@@ -1968,6 +2647,7 @@ PM_SYSTEM_PROMPT = """你是产品经理的 AI 助手，帮助用户完成产品
 2. 生成内容后，提示用户确认和修改
 3. 操作前询问用户，尤其是修改和删除操作
 4. 记住用户的偏好和项目上下文
+5. 调用工具时使用原生 function calling，不要在回复正文中输出 <function_calls>、<invoke>、<tool_use>、seed:tool_call 等文本标签
 
 能力范围：
 - PRD 生成和检查
@@ -1980,34 +2660,66 @@ PM_SYSTEM_PROMPT = """你是产品经理的 AI 助手，帮助用户完成产品
 - 版本对比分析
 - 关系关联建议
 
-当生成结构化内容时，在回复末尾用 JSON 块标记可执行的操作，格式：
-```action
-{"type": "pm.entry.create", "label": "操作名称", "description": "说明", "payload": {...}}
-```
+(v14) 工具调用通过标准 function calling 完成，不需要在回复正文中输出任何文本形式的工具调用标签或 ```action``` 块。
 """
 
 
 async def _call_llm(request: Request, user, system_prompt: str, user_message: str) -> str:
-    """Call OpenWebUI's LLM infrastructure for chat completion."""
+    """Call LLM with a system+user prompt. Returns content string only.
+
+    Used by non-agent endpoints (parameter extraction, PRD generation, etc.)
+    that don't need tool execution. Resolves the first available model so
+    generate_chat_completion doesn't raise 'Model not found'.
+    """
     try:
+        from open_webui.models.models import Models
         from open_webui.utils.chat import generate_chat_completion
 
+        models = await Models.get_all_models()
+        if not models:
+            log.error('[call_llm] No model available')
+            return ''
+        model_id = models[0].id
+
         payload = {
-            'model': '',
+            'model': model_id,
             'messages': [
                 {'role': 'system', 'content': system_prompt},
                 {'role': 'user', 'content': user_message},
             ],
             'stream': False,
         }
+
         result = await generate_chat_completion(request, payload, user)
-        if isinstance(result, dict):
-            choices = result.get('choices', [])
-            if choices:
-                return choices[0].get('message', {}).get('content', '')
-        return str(result)
+
+        # generate_chat_completion may return starlette.responses.JSONResponse
+        # (non-streaming path) — parse the body to get the dict.
+        if not isinstance(result, dict):
+            from starlette.responses import Response as StarletteResponse
+            if isinstance(result, StarletteResponse):
+                try:
+                    result = json.loads(result.body)
+                except (json.JSONDecodeError, ValueError, AttributeError) as e:
+                    log.error(
+                        f'[call_llm] Failed to parse JSONResponse body: {e}'
+                    )
+                    return ''
+            else:
+                log.warning(
+                    f'[call_llm] Unexpected response type: {type(result).__name__}'
+                )
+                return ''
+
+        choices = result.get('choices', [])
+        if not choices:
+            return ''
+        message = choices[0].get('message', {})
+        return message.get('content', '') or ''
     except Exception as e:
-        log.error(f'LLM call failed: {e}')
+        import traceback
+        log.error(
+            f'[call_llm] exception: {e}\n{traceback.format_exc()}'
+        )
         return ''
 
 
@@ -2055,71 +2767,124 @@ async def agent_chat(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """v14: PM Agent entry point.
+
+    Directly dispatches to the native pipeline (_agent_chat_native), which
+    uses the standard OpenWebUI chat loop (process_chat_payload +
+    generate_chat_completion with stream=True).
+    """
     skill_id, confidence = detect_intent(form_data.message)
+    return await _agent_chat_native(request, form_data, user, skill_id, confidence)
 
-    # Get skill instance if available
-    skill = SKILL_INSTANCES.get(skill_id)
-    system_prompt = skill.system_prompt if skill else PM_SYSTEM_PROMPT
 
-    # Append context to system prompt
-    context_parts = []
-    if form_data.context:
-        pname = form_data.context.get('projectName', '')
-        etitle = form_data.context.get('entryTitle', '')
-        if pname:
-            context_parts.append(f'当前项目: {pname}')
-        if form_data.module_type:
-            context_parts.append(f'当前模块: {form_data.module_type}')
-        if etitle:
-            context_parts.append(f'当前编辑条目: {etitle}')
-    if context_parts:
-        system_prompt = system_prompt + '\n\n' + '\n'.join(context_parts)
+async def _agent_chat_native(
+    request: Request,
+    form_data: AgentChatRequest,
+    user,
+    skill_id: str,
+    confidence: float,
+):
+    """v14 native pipeline path.
 
-    # Try LLM call
-    llm_response = await _call_llm(request, user, system_prompt, form_data.message)
+    Replaces the v13 _call_llm_with_tools + 5-round loop with the standard
+    OpenWebUI pipeline (process_chat_payload + generate_chat_completion).
 
-    if llm_response:
-        # Parse actions from response
-        actions = []
-        import re
-        action_pattern = r'```action\s*\n(.*?)\n```'
-        for match in re.finditer(action_pattern, llm_response, re.DOTALL):
-            try:
-                import json
-                action_data = json.loads(match.group(1))
-                actions.append({
-                    'id': f'action-{len(actions)}',
-                    'type': action_data.get('type', 'pm.entry.create'),
-                    'label': action_data.get('label', ''),
-                    'description': action_data.get('description', ''),
-                    'payload': action_data.get('payload', {}),
-                    'status': 'pending',
-                })
-            except Exception:
-                pass
-        # Clean response text (remove action blocks)
-        clean_response = re.sub(action_pattern, '', llm_response, flags=re.DOTALL).strip()
-        return {
-            'message': clean_response,
-            'intent': {'skillId': skill_id, 'confidence': confidence},
-            'actions': actions if actions else None,
-            'skillId': skill_id,
-        }
+    Why: v13 passed model='' to generate_chat_completion, which raised
+    Exception('Model not found') BEFORE the text-form FC parser could run.
+    The native pipeline resolves the model, applies MODEL_FUNCTION_CALLING_OVERRIDES
+    (forces doubao-seed-evolving:default → prompt-based FC), and auto-loads
+    PM tools when metadata['pm_project_id'] is set.
+    """
+    import uuid
+    from open_webui.models.models import Models
+    from open_webui.utils.middleware import process_chat_payload
+    from open_webui.utils.chat import generate_chat_completion
 
-    # Fallback: skill-based response without LLM
-    fallback_responses = {
-        'prd-generation': '我可以帮你生成 PRD 大纲。请告诉我：\n1. 产品名称和定位\n2. 目标用户群体\n3. 核心功能需求\n\n我会按照标准模板生成概述→背景→目标→功能需求→非功能需求→附录的结构。',
-        'requirement-analysis': '我可以帮你分析需求。请提供需求描述，我会给出：\n- 分类建议（功能/性能/安全/体验）\n- 优先级建议（P0-P3）\n- 潜在冲突和遗漏',
-        'competitor-research': '我可以帮你做竞品分析。请告诉我：\n1. 要分析的竞品名称\n2. 关注的对比维度\n\n我会生成对比矩阵和评分建议。',
-        'parameter-extract': '我可以帮你提取参数。请提供文档内容或指定 PRD 条目，我会提取出：\n- 参数名/Key\n- 参数类型（输入/输出/配置）\n- 数据类型\n- 默认值\n- 所属模块/功能',
-        'testcase-generate': '我可以帮你生成测试用例。请指定功能或需求，我会生成：\n- 功能测试用例\n- 边界测试用例\n- 异常测试用例',
-        'version-compare': '我可以帮你对比版本差异。请指定要对比的版本，我会列出各模块条目的变更。',
-        'relation-suggest': '我可以帮你建议关联关系。基于当前项目的条目，我会分析可能的依赖和引用关系。',
-        'workflow-suggest': '我可以帮你建议工作流。基于当前项目状态，我会建议下一步操作和待完成的步骤。',
-        'general': '我是你的 PM AI 助手，可以帮你：\n- 生成 PRD 文档\n- 分析需求\n- 竞品调研\n- 提取参数\n- 生成测试用例\n- 风险检查\n\n请告诉我你需要什么帮助？',
+    # 1. Resolve model (same pattern as agent_status at L3020).
+    #    Note: Models.get_all_models is async (models.py L187) — must await.
+    models = await Models.get_all_models()
+    if not models:
+        raise HTTPException(status_code=503, detail='No model available')
+    model_id = models[0].id
+    model = request.app.state.MODELS.get(model_id)
+    if not model:
+        raise HTTPException(status_code=503, detail=f'Model {model_id} not in app state')
+
+    # FC mode (function_calling) is no longer passed manually — the native
+    # pipeline resolves it from MODEL_FUNCTION_CALLING_OVERRIDES (config.py
+    # default: doubao-seed-evolving:default) via process_chat_payload.
+    log.info(
+        f'[v14-Diag] agent_chat native: model_id={model_id}, '
+        f'project_id={form_data.project_id}'
+    )
+
+    # 2. Build payload + metadata.
+    #    pm_project_id triggers PM tools auto-load in process_chat_payload
+    #    (middleware.py L3084-3168).
+    chat_id = f'pm-agent:{form_data.project_id}'
+    payload = {
+        'model': model_id,
+        'messages': [
+            {'role': 'user', 'content': form_data.message},
+        ],
+        'stream': True,
     }
+    # NOTE: __event_emitter__ is normally created by process_chat_payload
+    # via get_event_emitter(metadata) (middleware.py L2663) when metadata has
+    # chat_id + message_id (both present below). This placeholder is kept as
+    # a marker per spec; the real emitter will be injected into extra_params
+    # by process_chat_payload and used by the tool execution loop.
+    # TODO: __event_emitter__ 注入方式待验证 — standard pipeline auto-creates
+    # it from metadata.chat_id/message_id; this callable is a no-op fallback.
+    metadata = {
+        'chat_id': chat_id,
+        'message_id': str(uuid.uuid4()),
+        'user_id': user.id,
+        'pm_project_id': form_data.project_id,
+        '__event_emitter__': lambda *args, **kwargs: None,
+    }
+
+    # 4. process_chat_payload loads PM tools, injects system msg, dispatches FC mode
+    try:
+        payload, metadata, events = await process_chat_payload(
+            request, payload, user, metadata, model
+        )
+    except Exception as e:
+        log.exception(f'[v14-Diag] process_chat_payload failed: {e}')
+        raise HTTPException(status_code=500, detail=f'Pipeline setup failed: {e}')
+
+    tools_dict_keys = list((metadata.get('tools') or {}).keys())
+    log.info(
+        f'[v14-Diag] process_chat_payload done: tools={tools_dict_keys}, '
+        f'messages_count={len(payload.get("messages", []))}'
+    )
+
+    # 5. Generate LLM response (with tool execution loop inside).
+    #    With stream=True, generate_chat_completion returns a StreamingResponse
+    #    (SSE chunks) — return it directly so FastAPI streams tokens to the
+    #    frontend. The __event_emitter__ created by process_chat_payload
+    #    pushes status events (chat:active, tool calls) alongside the stream.
+    response = await generate_chat_completion(request, payload, user)
+    log.info(f'[v14-Diag] generate_chat_completion returned type={type(response).__name__}')
+
+    # 6. StreamingResponse (SSE) — return directly to client.
+    #    No JSONResponse body parsing, no choices[0].message.content extraction
+    #    (those only exist for non-streaming dict responses, which the PM agent
+    #    no longer produces). Action signals (pm.entry.confirm etc.) are now
+    #    delivered via __event_call__ on the tool side, not scanned from
+    #    payload['messages'] post-hoc.
+    if not isinstance(response, dict):
+        return response
+
+    # Defensive fallback: if a future caller sets stream=False, keep returning
+    # the message content so the API contract doesn't break.
+    choices = response.get('choices', [])
+    message = choices[0].get('message', {}) if choices else {}
+    content = message.get('content', '') or ''
+    log.info(f'[v14-Diag] response: content_len={len(content)}')
+
     return {
-        'message': fallback_responses.get(skill_id, fallback_responses['general']),
+        'message': content,
         'intent': {'skillId': skill_id, 'confidence': confidence},
         'skillId': skill_id,
     }
@@ -2131,7 +2896,7 @@ async def agent_status(
 ):
     try:
         from open_webui.models.models import Models
-        models = Models.get_all_models()
+        models = await Models.get_all_models()
         available = len(models) > 0
         model_name = models[0].id if models else ''
         return {
@@ -2215,6 +2980,12 @@ async def create_relation(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    rt = form_data.get('relation_type', 'references')
+    if rt not in ALLOWED_RELATION_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f'Invalid relation_type: {rt}. Allowed: {sorted(ALLOWED_RELATION_TYPES)}'
+        )
     from open_webui.models.pm import PMRelations, PMRelationForm
     relation_form = PMRelationForm(
         project_id=project_id,
@@ -2240,6 +3011,121 @@ async def delete_relation(
 ):
     from open_webui.models.pm import PMRelations
     await PMRelations.delete_relation_by_id(relation_id, db=db)
+    return True
+
+
+@router.post('/relations/{relation_id}/confirm', response_model=dict)
+async def confirm_relation(
+    relation_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """把 relation 状态置为已确认（confirmed=1）。"""
+    from open_webui.models.pm import PMRelation
+    from sqlalchemy import update as sql_update
+    await db.execute(
+        sql_update(PMRelation).where(PMRelation.id == relation_id).values(confirmed=1)
+    )
+    await db.commit()
+    return {'relation_id': relation_id, 'confirmed': 1}
+
+
+@router.post('/projects/{project_id}/relations/suggest', response_model=dict)
+async def suggest_relations(
+    project_id: str,
+    form_data: dict,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """按 target_module_type 拉候选 entity 返回，作为前端创建关系的建议源。"""
+    from open_webui.models.pm import PMEntities, PMRelations
+    entity_id = form_data.get('entity_id') or form_data.get('entityId', '')
+    target_module_type = form_data.get('target_module_type') or form_data.get('targetModuleType', '')
+    if not entity_id or not target_module_type:
+        return {'suggestions': []}
+    entities = await PMEntities.get_entities_by_project_id(project_id, db=db)
+    existing = await PMRelations.get_relations_by_entity_id(entity_id, db=db)
+    existing_ids = {r.entity_a_id for r in existing} | {r.entity_b_id for r in existing}
+    suggestions = [
+        {'entityBId': e.id, 'entityType': e.type, 'name': e.name}
+        for e in entities
+        if e.type == target_module_type and e.id != entity_id and e.id not in existing_ids
+    ][:20]
+    return {'suggestions': suggestions}
+
+
+@router.post('/projects/{project_id}/flowcharts/{flowchart_id}/traceability', response_model=dict)
+async def create_flowchart_traceability(
+    project_id: str,
+    flowchart_id: str,
+    form_data: dict,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """创建流程图节点 → entity 的绑定，同步在 pm_relation 插入 references 关系。"""
+    from open_webui.models.pm import (
+        PMFlowchartTraceabilities, PMFlowchartTraceabilityForm,
+        PMRelations, PMRelationForm
+    )
+    trace_form = PMFlowchartTraceabilityForm(
+        node_id=form_data.get('node_id', ''),
+        flowchart_id=flowchart_id,
+        entity_type=form_data.get('entity_type', 'none'),
+        entity_id=form_data.get('entity_id', ''),
+        entity_name=form_data.get('entity_name', ''),
+        version_id=form_data.get('version_id'),
+        bound_by=user.id,
+    )
+    trace = await PMFlowchartTraceabilities.insert_new_traceability(trace_form, db=db)
+    if trace and trace.entity_id:
+        rel_form = PMRelationForm(
+            project_id=project_id,
+            entity_a_id=trace.node_id,
+            entity_b_id=trace.entity_id,
+            relation_type='references',
+            confidence=100,
+            confirmed=1,
+            created_by=user.id,
+            version_id=trace.version_id,
+        )
+        await PMRelations.insert_new_relation(user.id, rel_form, db=db)
+    return trace
+
+
+@router.get('/projects/{project_id}/flowcharts/{flowchart_id}/traceability', response_model=list)
+async def list_flowchart_traceability(
+    project_id: str,
+    flowchart_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """列出某流程图的所有节点绑定。"""
+    from open_webui.models.pm import PMFlowchartTraceabilities
+    return await PMFlowchartTraceabilities.get_traceabilities_by_flowchart_id(flowchart_id, db=db)
+
+
+@router.delete('/flowchart-traceability/{trace_id}', response_model=dict)
+async def delete_flowchart_traceability(
+    trace_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """删除流程图绑定，级联删除对应 pm_relation。"""
+    from open_webui.models.pm import PMFlowchartTraceabilities, PMFlowchartTraceability, PMRelation
+    from sqlalchemy import delete as sql_delete, select as sql_select
+    # 先查 trace 拿 node_id / entity_id（用于级联删 pm_relation）
+    trace_result = await db.execute(
+        sql_select(PMFlowchartTraceability).where(PMFlowchartTraceability.id == trace_id)
+    )
+    trace = trace_result.scalar_one_or_none()
+    await PMFlowchartTraceabilities.delete_traceability_by_id(trace_id, db=db)
+    if trace and trace.node_id and trace.entity_id:
+        await db.execute(sql_delete(PMRelation).where(
+            PMRelation.entity_a_id == trace.node_id,
+            PMRelation.entity_b_id == trace.entity_id,
+            PMRelation.relation_type == 'references',
+        ))
+        await db.commit()
     return True
 
 
@@ -2648,6 +3534,11 @@ async def agent_tool_create_relation(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Agent tool: create a relation between entities."""
+    if form_data.relation_type not in ALLOWED_RELATION_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f'Invalid relation_type: {form_data.relation_type}. Allowed: {sorted(ALLOWED_RELATION_TYPES)}'
+        )
     from open_webui.models.pm import PMRelations, PMRelationForm
     relation_form = PMRelationForm(
         project_id=form_data.project_id,

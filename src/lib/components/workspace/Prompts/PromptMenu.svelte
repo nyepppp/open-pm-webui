@@ -8,6 +8,8 @@
 	import Share from '$lib/components/icons/Share.svelte';
 	import DocumentDuplicate from '$lib/components/icons/DocumentDuplicate.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
+	// 升级为角色菜单项使用的徽章勾选图标
+	import UserBadgeCheck from '$lib/components/icons/UserBadgeCheck.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -16,6 +18,8 @@
 	export let exportHandler: Function;
 	export let deleteHandler: Function;
 	export let onClose: Function;
+	// 可选：升级为角色回调。仅当传入时显示“升级为角色”菜单项
+	export let upgradeHandler: (() => void) | undefined = undefined;
 
 	let show = false;
 </script>
@@ -59,18 +63,33 @@
 			</button>
 
 			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.prompts_export}
-				<button
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-					on:click={() => {
-						exportHandler();
-					}}
-				>
-					<Download />
-					<div class="flex items-center">{$i18n.t('Export')}</div>
-				</button>
-			{/if}
+			<button
+				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				on:click={() => {
+					exportHandler();
+				}}
+			>
+				<Download />
+				<div class="flex items-center">{$i18n.t('Export')}</div>
+			</button>
+		{/if}
 
-			<hr class="border-gray-50 dark:border-gray-850/30 my-1" />
+		{#if upgradeHandler}
+			<!-- 升级为角色：仅当父组件传入 upgradeHandler 时显示 -->
+			<button
+				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				on:click={() => {
+					upgradeHandler();
+					// 触发后关闭菜单
+					show = false;
+				}}
+			>
+				<UserBadgeCheck />
+				<div class="flex items-center">升级为角色</div>
+			</button>
+		{/if}
+
+		<hr class="border-gray-50 dark:border-gray-850/30 my-1" />
 
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"

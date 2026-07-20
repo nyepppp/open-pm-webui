@@ -649,6 +649,633 @@ async def get_builtin_tools(
     return tools_dict
 
 
+async def get_pm_builtin_tools(
+    request: Request, extra_params: dict, user: UserModel
+) -> dict[str, dict]:
+    """注册 PM 项目上下文工具（get_pm_module_entries / get_pm_entry_detail）。
+
+    与 get_builtin_tools 不同，本函数只注册 PM 工具，且不依赖
+    function_calling 模式——调用方负责决定是否调用本函数
+    （通常基于 pm_project_id 存在 + 意图识别通过）。
+
+    Returns:
+        tools_dict 条目，key 为工具名，value 为 {'tool_id', 'callable', 'spec', 'type'}。
+    """
+    tools_dict = {}
+    pm_project_id = (extra_params.get('__metadata__') or {}).get('pm_project_id')
+    if not pm_project_id:
+        return tools_dict
+
+    from open_webui.pm.chat_context import get_pm_entry_detail_full, get_pm_module_entries_full
+
+    async def get_pm_module_entries(
+        module_type: str,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """读取 PM 项目中指定模块的全部条目详情（含完整描述）。
+
+        Args:
+            module_type: 模块类型，如 requirement / parameter / risk / schedule / roadmap / meeting / testcase / faq / acceptance / competitor / prototype / spec / flowchart / prd / architecture / requirement-boundary
+
+        Returns:
+            JSON 字符串，包含该模块所有条目的 title / status / priority / content（content 截断 500 字）/ data。
+        """
+        pid = __metadata__.get('pm_project_id')
+        if not pid or not __user__:
+            return '{"error": "未选择项目或用户未认证"}'
+        # __user__ 是 dict（来自 user.model_dump()），构造回 UserModel 以便访问校验
+        from open_webui.models.users import UserModel
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        entries = await get_pm_module_entries_full(module_type, pid, user_obj)
+        return json.dumps(entries, ensure_ascii=False, indent=2)
+
+    async def get_pm_entry_detail(
+        entry_id: str,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """读取 PM 项目中单条目的完整内容（不截断）。
+
+        Args:
+            entry_id: 条目 ID
+
+        Returns:
+            JSON 字符串，包含该条目的完整 content 和 data 字段。
+        """
+        if not __user__:
+            return '{"error": "用户未认证"}'
+        from open_webui.models.users import UserModel
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        entry = await get_pm_entry_detail_full(entry_id, user_obj)
+        return json.dumps(entry, ensure_ascii=False, indent=2)
+
+    # D33: PM 写入工具 — 让 AI 在 chat 中通过 function calling 直接创建/更新条目、
+    # 创建条目版本、创建关联。修复「AI 调用 write_pm_module_entries 失败」问题 ——
+    # 该函数名是 AI 编造的，实际不存在；现在提供真实可调用的 builtin 工具。
+    # 与工作流 pm_module 节点路径并存（D27 双路径决策），AI 按场景自主选择。
+    async def pm_entry_create(
+        module_type: str,
+        title: str,
+        content: str = '',
+        data: dict = {},
+        status: str = 'draft',
+        priority: str = 'medium',
+        parent_id: str = None,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """在当前 PM 项目中创建一条新条目。仅在用户明确要求创建时调用。
+
+        Args:
+            module_type: 模块类型，如 prd / architecture / requirement / parameter / risk / schedule / roadmap / meeting / testcase / faq / acceptance / competitor / prototype / spec / flowchart / requirement-boundary
+            title: 条目标题
+            content: 条目正文（PRD/架构等富文本可为 Markdown）
+            data: 条目结构化数据（如参数表的字段定义、竞品的对比维度等）
+            status: 条目状态，如 draft / approved / archived
+            priority: 优先级，如 low / medium / high
+            parent_id (str, optional): 父条目 ID（写入 data.parent_entry_id，用于模块/功能/参数层级链接）
+
+        Returns:
+            JSON 字符串，包含 success / entry_id / title。
+        """
+        pid = __metadata__.get('pm_project_id')
+        if not pid or not __user__:
+            return '{"error": "未选择项目或用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.models.pm import PMEntries, PMEntryForm
+        from open_webui.pm.chat_context import _verify_project_access
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        if not await _verify_project_access(pid, user_obj):
+            return '{"error": "无权限访问该项目"}'
+        # Merge parent_id into data JSON as parent_entry_id (D44: 工具层加 parent_id 支持)
+        effective_data = dict(data or {})
+        if parent_id:
+            effective_data['parent_entry_id'] = parent_id
+        form = PMEntryForm(
+            project_id=pid,
+            module_type=module_type,
+            title=title,
+            content=content,
+            data=effective_data,
+            status=status,
+            priority=priority,
+        )
+        entry = await PMEntries.insert_new_entry(user_obj.id, form)
+        return json.dumps(
+            {
+                'success': entry is not None,
+                'entry_id': entry.id if entry else None,
+                'title': entry.title if entry else None,
+            },
+            ensure_ascii=False,
+        )
+
+    async def pm_entry_update(
+        entry_id: str,
+        title: str = None,
+        content: str = None,
+        data: dict = None,
+        status: str = None,
+        priority: str = None,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """更新已存在的 PM 条目。仅在用户明确要求更新时调用。
+
+        Args:
+            entry_id: 条目 ID
+            title: 新标题（可选）
+            content: 新正文（可选）
+            data: 新结构化数据（可选，整体替换）
+            status: 新状态（可选）
+            priority: 新优先级（可选）
+
+        Returns:
+            JSON 字符串，包含 success / entry_id / title。
+        """
+        if not __user__:
+            return '{"error": "用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.models.pm import PMEntries, PMEntryUpdateForm, PMProjects
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        # 校验条目归属：先取条目，再校验项目属于用户
+        entry = await PMEntries.get_entry_by_id(entry_id)
+        if not entry:
+            return '{"error": "条目不存在"}'
+        project = await PMProjects.get_project_by_id(entry.project_id)
+        if not project or project.user_id != user_obj.id:
+            return '{"error": "无权限访问该条目"}'
+        update_data: dict = {}
+        if title is not None:
+            update_data['title'] = title
+        if content is not None:
+            update_data['content'] = content
+        if data is not None:
+            update_data['data'] = data
+        if status is not None:
+            update_data['status'] = status
+        if priority is not None:
+            update_data['priority'] = priority
+        if not update_data:
+            return '{"error": "未提供任何更新字段"}'
+        form = PMEntryUpdateForm(**update_data)
+        updated = await PMEntries.update_entry_by_id(entry_id, form)
+        return json.dumps(
+            {
+                'success': updated is not None,
+                'entry_id': updated.id if updated else None,
+                'title': updated.title if updated else None,
+            },
+            ensure_ascii=False,
+        )
+
+    async def pm_entry_version_create(
+        entry_id: str,
+        change_summary: str = '',
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """为已存在的 PM 条目创建一个版本快照（PMEntryVersion）。仅在用户明确要求保存版本时调用。
+
+        Args:
+            entry_id: 条目 ID
+            change_summary: 版本变更说明
+
+        Returns:
+            JSON 字符串，包含 success / version_id / version_number。
+        """
+        if not __user__:
+            return '{"error": "用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.models.pm import PMEntries, PMEntryVersions, PMEntryVersionForm, PMProjects
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        entry = await PMEntries.get_entry_by_id(entry_id)
+        if not entry:
+            return '{"error": "条目不存在"}'
+        project = await PMProjects.get_project_by_id(entry.project_id)
+        if not project or project.user_id != user_obj.id:
+            return '{"error": "无权限访问该条目"}'
+        version_form = PMEntryVersionForm(
+            entry_id=entry_id,
+            project_id=entry.project_id,
+            module_type=entry.module_type,
+            content=entry.content,
+            entry_metadata=entry.data,
+            change_summary=change_summary or 'Version snapshot',
+        )
+        version = await PMEntryVersions.insert_new_version(user_obj.id, version_form)
+        return json.dumps(
+            {
+                'success': version is not None,
+                'version_id': version.id if version else None,
+                'version_number': version.version_number if version else None,
+            },
+            ensure_ascii=False,
+        )
+
+    async def pm_relation_create(
+        entity_a_id: str,
+        entity_b_id: str,
+        relation_type: str,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """在当前 PM 项目中创建两个条目之间的关联。仅在用户明确要求建立关联时调用。
+
+        Args:
+            entity_a_id: 起始条目 ID
+            entity_b_id: 目标条目 ID
+            relation_type: 关联类型，如 depends_on / related_to / verifies / derived_from
+
+        Returns:
+            JSON 字符串，包含 success / relation_id。
+        """
+        pid = __metadata__.get('pm_project_id')
+        if not pid or not __user__:
+            return '{"error": "未选择项目或用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.models.pm import PMRelations, PMRelationForm
+        from open_webui.pm.chat_context import _verify_project_access
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        if not await _verify_project_access(pid, user_obj):
+            return '{"error": "无权限访问该项目"}'
+        relation_form = PMRelationForm(
+            project_id=pid,
+            entity_a_id=entity_a_id,
+            entity_b_id=entity_b_id,
+            relation_type=relation_type,
+            created_by=user_obj.id,
+        )
+        relation = await PMRelations.insert_new_relation(user_obj.id, relation_form)
+        return json.dumps(
+            {
+                'success': relation is not None,
+                'relation_id': relation.id if relation else None,
+            },
+            ensure_ascii=False,
+        )
+
+    # D43: 批量写入工具 —— 消除 B1 系统提示与工具实现脱节导致的新幻觉源。
+    # 系统提示(chat_context.py:246-248)已列出本工具名，必须真实注册，否则 AI 按提示合法调用却失败。
+    async def pm_entry_batch_create(
+        module_type: str,
+        entries: list[dict],
+        parent_id: str = None,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """批量创建条目。一次写入多条架构条目，避免多次循环调用 pm_entry_create。
+
+        Args:
+            module_type: 模块类型，如 'product-architecture' / 'prd' / 'requirement'
+            entries: 条目列表，每项含 title / content(可选) / data(可选) / status(可选) / priority(可选)。
+                每项还可含 parent_entry_id（覆盖外层 parent_id）。若 entry 未自带 parent_entry_id
+                且外层 parent_id 提供，则把外层 parent_id 写入 entry.data.parent_entry_id。
+            parent_id (str, optional): 外层 fallback parent_id。每个 entry 未自带 parent_entry_id 时使用。
+
+        Returns:
+            JSON 字符串，含 created / failed / total。
+        """
+        pid = __metadata__.get('pm_project_id')
+        if not pid or not __user__:
+            return '{"error": "未选择项目或用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.models.pm import PMEntries, PMEntryForm
+        from open_webui.pm.chat_context import _verify_project_access
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        if not await _verify_project_access(pid, user_obj):
+            return '{"error": "无权限访问该项目"}'
+
+        created = []
+        failed = []
+        for entry in entries or []:
+            try:
+                # D44: parent_entry_id fallback —— entry 自带优先，外层 parent_id 兜底
+                effective_parent = entry.get('parent_entry_id', parent_id)
+                entry_data = dict(entry.get('data') or {})
+                if effective_parent:
+                    entry_data['parent_entry_id'] = effective_parent
+                form = PMEntryForm(
+                    project_id=pid,
+                    module_type=module_type,
+                    title=entry.get('title', f'{module_type} entry'),
+                    content=entry.get('content', ''),
+                    data=entry_data,
+                    status=entry.get('status', 'draft'),
+                    priority=entry.get('priority', 'medium'),
+                )
+                new_entry = await PMEntries.insert_new_entry(user_obj.id, form)
+                if new_entry:
+                    created.append({'id': new_entry.id, 'title': new_entry.title})
+                else:
+                    failed.append({'title': entry.get('title'), 'error': 'insert returned None'})
+            except Exception as e:
+                failed.append({'title': entry.get('title'), 'error': str(e)})
+        return json.dumps(
+            {
+                'created': created,
+                'failed': failed,
+                'total': len(entries or []),
+                'success_count': len(created),
+            },
+            ensure_ascii=False,
+        )
+
+    # D43/D38: 批量写入预览工具 —— 不真实写入，返回结构化预览供用户确认。
+    # 与 pm_entry_batch_create 配对：AI 先调 preview → 前端渲染确认卡片 → 用户确认后调真实写入。
+    async def pm_entry_batch_create_preview(
+        module_type: str,
+        entries: list[dict],
+        parent_id: str = None,
+        __metadata__: dict = {},
+        __user__=None,
+    ) -> str:
+        """批量创建条目前的预览（不真实写入）。返回结构化预览供用户确认。
+
+        Args:
+            module_type: 模块类型
+            entries: 待创建条目列表，每项含 title / content(可选) / data(可选) / parent_entry_id(可选)
+            parent_id (str, optional): 外层 fallback parent_id。每个 entry 未自带 parent_entry_id 时使用。
+
+        Returns:
+            JSON 字符串，含 preview / will_create_count / warnings / confirm_tool。
+        """
+        pid = __metadata__.get('pm_project_id')
+        if not pid or not __user__:
+            return '{"error": "未选择项目或用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.pm.chat_context import _verify_project_access
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        if not await _verify_project_access(pid, user_obj):
+            return '{"error": "无权限访问该项目"}'
+
+        warnings = []
+        preview = []
+        for i, entry in enumerate(entries or []):
+            title = (entry.get('title') or '').strip()
+            if not title:
+                warnings.append(f'第 {i+1} 条缺少 title，将被跳过')
+                continue
+            content_raw = entry.get('content', '') or ''
+            content_len = len(content_raw)
+            # D44: parent_entry_id fallback —— entry 自带优先，外层 parent_id 兜底
+            effective_parent = entry.get('parent_entry_id', parent_id)
+            preview.append({
+                'index': i,
+                'title': title,
+                'content_preview': content_raw[:80] + ('...' if content_len > 80 else ''),
+                'data_keys': list(entry.get('data', {}).keys()) if entry.get('data') else [],
+                'parent_entry_id': effective_parent,
+            })
+        return json.dumps(
+            {
+                'preview': preview,
+                'will_create_count': len(preview),
+                'warnings': warnings,
+                'confirm_tool': 'pm_entry_batch_create',
+                'module_type': module_type,
+                'fallback_parent_id': parent_id,
+            },
+            ensure_ascii=False,
+        )
+
+    # Bug 8 (v10): 注册 pm_entry_delete —— 补齐 CRUD 中的 Delete 能力。
+    # 底层 delete_entry_by_id (models/pm.py L753) 已实现，本工具仅做权限校验 + 包装。
+    # 配合 OperationPreviewModal 强制确认流程（D96）：本工具支持 confirmed 参数，
+    # 当 confirmed=False 时返回 needs_confirmation，前端弹窗，用户确认后 AI 重调 confirmed=True。
+    # 流式改造（v15）：新增 __event_call__ 注入参数。当 confirmed=False 且 __event_call__ 可用时，
+    # 工具直接通过 __event_call__ 同步触发前端确认弹窗并阻塞等待用户响应，无需后端再扫 messages。
+    # __event_call__ 不可用时（legacy 管道）退化为旧的 needs_confirmation JSON 行为。
+    async def pm_entry_delete(
+        entry_id: str,
+        confirmed: bool = False,
+        __metadata__: dict = {},
+        __user__=None,
+        __event_call__: Optional[Callable] = None,
+    ) -> str:
+        """删除已存在的 PM 条目（硬删除，不可恢复）。
+
+        ⚠️ 危险操作：必须先以 confirmed=False 调用本工具获取预览，用户在前端弹窗确认后，
+        再以 confirmed=True 重调本工具执行真正的删除。
+
+        在支持 __event_call__ 的流式管道（OpenWebUI 0.9.6+）中，confirmed=False 会同步触发
+        前端确认弹窗并阻塞等待用户响应：用户点"确认删除"后返回 user_confirmed=true，AI 应以
+        confirmed=True 重新调用本工具完成真正删除；用户点"取消"返回 cancelled=true。
+        在 legacy 管道（__event_call__ 为 None）下退化为返回 needs_confirmation=true JSON，
+        由后端 _agent_chat_native 扫 messages 转前端 actions。
+
+        Args:
+            entry_id: 要删除的条目 ID
+            confirmed: 是否已获用户确认。默认 False（返回预览不删除）。
+
+        Returns:
+            - confirmed=False 且 __event_call__ 可用：用户确认后返回 {user_confirmed, entry_id, entry_title, message}；
+              用户取消时返回 {cancelled, entry_id, entry_title, message}
+            - confirmed=False 且 __event_call__ 不可用：JSON {needs_confirmation, operation, entry_id, entry_title, module_type, content_preview, message}
+            - confirmed=True 时：JSON 字符串，含 success / entry_id / title
+        """
+        if not __user__:
+            return '{"error": "用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.models.pm import PMEntries, PMProjects
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        entry = await PMEntries.get_entry_by_id(entry_id)
+        if not entry:
+            return '{"error": "条目不存在"}'
+        project = await PMProjects.get_project_by_id(entry.project_id)
+        if not project or project.user_id != user_obj.id:
+            return '{"error": "无权限删除该条目"}'
+
+        # Phase 1: preview (no execution)
+        if not confirmed:
+            content_preview = (entry.content or '')[:200]
+            # 流式管道：用 __event_call__ 同步触发前端确认弹窗并阻塞等待用户响应
+            if __event_call__ is not None:
+                try:
+                    response = await __event_call__(
+                        {
+                            'type': 'pm.entry.confirm',
+                            'data': {
+                                'operation': 'delete',
+                                'entry_id': entry_id,
+                                'entry_title': entry.title,
+                                'module_type': entry.module_type,
+                                'content_preview': content_preview,
+                                'message': f'即将删除条目「{entry.title}」，此操作不可撤销。',
+                                'buttons': [
+                                    {'id': 'confirm', 'label': '确认删除', 'primary': True, 'value': True},
+                                    {'id': 'cancel', 'label': '取消', 'primary': False, 'value': False},
+                                ],
+                            },
+                        }
+                    )
+                except Exception as e:
+                    # 异常（超时 / 前端断开 / 类型错误）退化为 legacy needs_confirmation JSON
+                    return json.dumps(
+                        {
+                            'needs_confirmation': True,
+                            'operation': 'delete',
+                            'entry_id': entry_id,
+                            'entry_title': entry.title,
+                            'module_type': entry.module_type,
+                            'content_preview': content_preview,
+                            'message': f'即将删除条目「{entry.title}」，此操作不可撤销。',
+                            'fallback_reason': f'__event_call__ failed: {e}',
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                # 兼容多种前端响应格式：{'confirmed': True/False}、{'action': 'confirm'/'cancel'}、
+                # {'confirmed': 'confirm'/'cancel'}、{'value': True/False}
+                confirmed_by_user = False
+                if isinstance(response, dict):
+                    if response.get('confirmed') is True or response.get('value') is True:
+                        confirmed_by_user = True
+                    elif response.get('action') == 'confirm':
+                        confirmed_by_user = True
+                    elif response.get('confirmed') == 'confirm':
+                        confirmed_by_user = True
+                if confirmed_by_user:
+                    return json.dumps(
+                        {
+                            'user_confirmed': True,
+                            'operation': 'delete',
+                            'entry_id': entry_id,
+                            'entry_title': entry.title,
+                            'message': f'用户已在前端确认删除条目「{entry.title}」，请以 confirmed=True 重新调用本工具执行真正的删除。',
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                return json.dumps(
+                    {
+                        'cancelled': True,
+                        'operation': 'delete',
+                        'entry_id': entry_id,
+                        'entry_title': entry.title,
+                        'message': '用户取消了删除操作。',
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            # Legacy: 返回 needs_confirmation JSON，由 _agent_chat_native 扫 messages 转前端 actions
+            return json.dumps(
+                {
+                    'needs_confirmation': True,
+                    'operation': 'delete',
+                    'entry_id': entry_id,
+                    'entry_title': entry.title,
+                    'module_type': entry.module_type,
+                    'content_preview': content_preview,
+                    'message': f'即将删除条目「{entry.title}」，此操作不可撤销。',
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # Phase 2: confirmed execution
+        title = entry.title
+        deleted = await PMEntries.delete_entry_by_id(entry_id)
+        return json.dumps(
+            {
+                'success': deleted is not None,
+                'entry_id': entry_id,
+                'title': title,
+            },
+            ensure_ascii=False,
+        )
+
+    # D44: PRD → 模块-功能-参数 原子化转换工具。
+    # 包装 PRDToMFPSkill.transform() —— skill 内部用 LLM 提取结构化 JSON，
+    # 然后 5 步原子化创建（模块→功能→参数），任一步失败 hard delete 回滚。
+    # 双链接：data.parent_entry_id（ID-based） + data.moduleName/featureName（name-based，供前端 moduleFields.ts 编辑器读取）
+    async def pm_prd_to_mfp_transform(
+        prd_entry_id: str,
+        __metadata__: dict = {},
+        __user__=None,
+        __request__=None,
+    ) -> str:
+        """将 PRD 条目原子化转换为模块-功能-参数层级。
+
+        读取 PRD 完整内容，内部用 LLM 提取结构化 JSON，一次性创建所有模块/功能/参数条目
+        （含 parent_entry_id 和 moduleName/featureName 双链接）。失败时自动回滚。
+
+        Args:
+            prd_entry_id: PRD 条目 ID（通过 get_pm_module_entries(module_type=prd) 查询）
+
+        Returns:
+            JSON 字符串，含 success / created_modules / created_functions / created_parameters
+            / total / by_module / rolled_back / error
+        """
+        pid = __metadata__.get('pm_project_id')
+        if not pid or not __user__:
+            return '{"success": false, "error": "未选择项目或用户未认证"}'
+        from open_webui.models.users import UserModel
+        from open_webui.pm.skills.prd_to_mfp import PRDToMFPSkill
+        from open_webui.pm.chat_context import _verify_project_access
+
+        user_obj = UserModel(**__user__) if isinstance(__user__, dict) else __user__
+        if not await _verify_project_access(pid, user_obj):
+            return '{"success": false, "error": "无权限访问该项目"}'
+
+        skill = PRDToMFPSkill()
+        result = await skill.transform(
+            prd_entry_id=prd_entry_id,
+            user=user_obj,
+            metadata=__metadata__,
+            request=__request__,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    pm_functions = [
+        get_pm_module_entries,
+        get_pm_entry_detail,
+        pm_entry_create,                   # D33: 写入工具
+        pm_entry_update,                   # D33: 写入工具
+        pm_entry_version_create,           # D33: 写入工具
+        pm_relation_create,                # D33: 写入工具
+        pm_entry_batch_create,             # D43: 批量写入（消除 B1 提示与实现脱节）
+        pm_entry_batch_create_preview,     # D43/D38: 批量写入预览（不真实写入）
+        pm_entry_delete,                   # Bug 8 (v10): 删除工具（confirmed 二阶段）
+        pm_prd_to_mfp_transform,           # D44: PRD 原子化转模块-功能-参数（含层级链接）
+    ]
+    for func in pm_functions:
+        callable = await get_async_tool_function_and_apply_extra_params(
+            func,
+            {
+                '__request__': request,
+                '__user__': extra_params.get('__user__', {}),
+                '__event_emitter__': extra_params.get('__event_emitter__'),
+                '__event_call__': extra_params.get('__event_call__'),
+                '__metadata__': extra_params.get('__metadata__'),
+                '__chat_id__': extra_params.get('__chat_id__'),
+                '__message_id__': extra_params.get('__message_id__'),
+                '__model_knowledge__': None,
+            },
+        )
+        pydantic_model = convert_function_to_pydantic_model(func)
+        spec = convert_pydantic_model_to_openai_function_spec(pydantic_model)
+        spec = clean_openai_tool_schema(spec)
+        tools_dict[func.__name__] = {
+            'tool_id': f'builtin:{func.__name__}',
+            'callable': callable,
+            'spec': spec,
+            'type': 'builtin',
+        }
+    return tools_dict
+
+
 def parse_description(docstring: str | None) -> str:
     """
     Parse a function's docstring to extract the description.

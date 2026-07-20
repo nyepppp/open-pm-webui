@@ -285,6 +285,7 @@ from open_webui.config import (
     MINERU_PARAMS,
     MISTRAL_OCR_API_BASE_URL,
     MISTRAL_OCR_API_KEY,
+    MODEL_FUNCTION_CALLING_OVERRIDES,
     MODEL_ORDER_LIST,
     MOJEEK_SEARCH_API_KEY,
     OAUTH_ADMIN_ROLES,
@@ -506,10 +507,15 @@ from open_webui.routers import (
     skills,
     tasks,
     terminals,
+    timbal,
     tools,
     users,
     utils,
+    workflows,
 )
+
+from open_webui.pm.api.v2_workflows import router as pm_v2_workflows_router
+from open_webui.pm.api.v2_agent import router as pm_v2_agent_router
 from open_webui.routers.retrieval import (
     get_ef,
     get_embedding_function,
@@ -1446,6 +1452,9 @@ app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
 app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 app.include_router(pm.router, prefix='/api/v1/pm', tags=['pm'])
 
+app.include_router(pm_v2_workflows_router, prefix='/api/v1/pm', tags=['pm-v2-workflows'])
+app.include_router(pm_v2_agent_router, prefix='/api/v1/pm', tags=['pm-v2-agent'])
+
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
@@ -1465,6 +1474,8 @@ app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
 app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
 app.include_router(calendar.router, prefix='/api/v1/calendars', tags=['calendars'])
+app.include_router(workflows.router, prefix='/api/v1/workflows', tags=['workflows'])
+app.include_router(timbal.router, prefix='/api/v1/timbal', tags=['timbal'])
 
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
@@ -1812,8 +1823,24 @@ async def chat_completion(
                     )
                     else 'default'
                 ),
-            },
-        }
+        },
+        'pm_project_id': form_data.get('pm_project_id', None),
+    }
+
+        # Bug 6 (v9): Per-model FC override — takes precedence over the computed value above.
+        # Doubao defaults to 'default' (prompt-based) to avoid leaking native FC tokens as text.
+        # The text-form FC parser in middleware.py acts as backup for any residual leaks.
+        _fc_overrides_str = MODEL_FUNCTION_CALLING_OVERRIDES.value
+        if _fc_overrides_str:
+            for _pair in _fc_overrides_str.split(','):
+                if ':' in _pair:
+                    _k, _v = _pair.split(':', 1)
+                    if _k.strip() == model:
+                        metadata['params']['function_calling'] = _v.strip()
+                        log.debug(
+                            f"[Bug6-Diag] FC mode override for {_k.strip()}: {_v.strip()}"
+                        )
+                        break
 
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())

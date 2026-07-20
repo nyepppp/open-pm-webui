@@ -46,7 +46,7 @@
 	let detectArtifacts = true;
 	let displayMultiModelResponsesInTabs = false;
 
-	let richTextInput = true;
+	let richTextInput = false;
 	let showFormattingToolbar = false;
 	let insertPromptAsRichText = false;
 	let promptAutocomplete = false;
@@ -218,7 +218,7 @@
 		displayMultiModelResponsesInTabs = $settings?.displayMultiModelResponsesInTabs ?? false;
 		chatFadeStreamingText = $settings?.chatFadeStreamingText ?? true;
 
-		richTextInput = $settings?.richTextInput ?? true;
+		richTextInput = $settings?.richTextInput ?? false;
 		showFormattingToolbar = $settings?.showFormattingToolbar ?? false;
 		insertPromptAsRichText = $settings?.insertPromptAsRichText ?? false;
 		promptAutocomplete = $settings?.promptAutocomplete ?? false;

@@ -19,15 +19,3 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
-
-<!-- SPECKIT START -->
-## Current Feature
-
-- **Feature**: specs/006-agent-workflow-designer
-- **Spec**: specs/006-agent-workflow-designer/spec.md
-- **Plan**: specs/006-agent-workflow-designer/plan.md (when created)
-
-## Project Context
-
-This project is open-pm-webui, a fork of Open WebUI with PM workspace enhancements.
-<!-- SPECKIT END -->

@@ -2,6 +2,7 @@
 
 ## PM Module
 - [pm-v5-architecture-goals](pm-v5-architecture-goals.md) — User's 6-point mandate for PM workspace deep integration and completion — highest execution approval granted
+- [pm-v5-bug-batch](pm-v5-bug-batch.md) — 2026-07-13: All 8 Vibe annotation issues fixed (workflows, mindmap, traceability, flowchart, version display, home page)
 - [planner-mode-activation](planner-mode-activation.md) — 5-phase PM module implementation plan approved 2026-07-03; 7 tasks created and assigned
 - [pm-planner-execution-progress](pm-planner-execution-progress.md) — 2026-07-03 sde-tester verdict FAILED: P0 metadata-column bug still on disk despite "rework completed" claim; 138 PM frontend TS errors, no Alembic migrations, no PM tests
 - [pm-v4-bug-batch](pm-v4-bug-batch.md) — 18 Vibe annotations → spec at specs/002-pm-v4-bugfix/spec.md → root causes confirmed for all P0/P1 bugs; implementation plan created with 11 tasks

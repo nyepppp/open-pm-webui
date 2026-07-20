@@ -884,9 +884,9 @@
 							{/if}
 
 							{#if message.code_executions}
-								<CodeExecutions codeExecutions={message.code_executions} />
-							{/if}
-						</div>
+							<CodeExecutions codeExecutions={message.code_executions} />
+						{/if}
+					</div>
 					</div>
 				</div>
 

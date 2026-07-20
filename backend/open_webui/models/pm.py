@@ -1,11 +1,25 @@
+import logging
 import time
 import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, get_async_db_context
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import JSON, BigInteger, Column, Text, delete, func, select, update
+from sqlalchemy import JSON, BigInteger, Column, Index, Text, delete, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# J4/D70: 用于 insert_new_entry 空字段校验日志
+logger = logging.getLogger(__name__)
+
+
+class DuplicateProjectNameError(Exception):
+    """Raised when a user attempts to create or rename a project to a name
+    that is already in use by an active (non-archived) project they own."""
+
+    def __init__(self, name: str):
+        super().__init__(f"An active project named '{name}' already exists")
+        self.name = name
 
 
 ####################
@@ -16,6 +30,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class PMProject(Base):
     __tablename__ = 'pm_project'
 
+    # Partial unique index: a user cannot have two active projects with the
+    # same name, but archived projects are excluded so the name can be reused.
+    # The matching migration is c9d0e1f2a3b4_add_unique_constraint_pm_project.py.
+    __table_args__ = (
+        Index(
+            'uq_pm_project_user_name_active',
+            'user_id',
+            'name',
+            unique=True,
+            postgresql_where=text("status != 'archived'"),
+            sqlite_where=text("status != 'archived'"),
+        ),
+    )
+
     id = Column(Text, primary_key=True, unique=True)
     user_id = Column(Text)
     name = Column(Text)
@@ -24,6 +52,7 @@ class PMProject(Base):
     meta = Column(JSON, nullable=True)
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+    current_version_id = Column(Text, nullable=True)  # 当前激活的项目版本 ID（pm_version.id）
 
 
 class PMVersion(Base):
@@ -56,8 +85,31 @@ class PMEntry(Base):
     status = Column(Text, default='draft')
     priority = Column(Text, nullable=True)
     version = Column(BigInteger, default=1)
+    created_version_number = Column(Text, nullable=True)  # version number at creation time (e.g. 'v1')
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+    project_version_id = Column(Text, nullable=True, index=True)  # 关联项目版本（pm_version.id），持久化而非 JSON 内
+    source_entry_id = Column(Text, nullable=True, index=True)  # 派生源条目 ID（如从 PRD 派生需求）
+    module_version_id = Column(Text, nullable=True, index=True)  # 关联模块版本（pm_module_version.id），用于架构模块多版本管理
+
+
+class PMModuleVersion(Base):
+    """模块版本表 — 支持产品架构模块的多版本管理。
+
+    一个 module entry（module_type='product-architecture' 且 node_type='module'）
+    可以有多个版本，记录创建时间、变更摘要、关联的项目版本。
+    module/feature/parameter entry 通过 PMEntry.module_version_id 绑定到具体模块版本。
+    """
+    __tablename__ = 'pm_module_version'
+
+    id = Column(Text, primary_key=True, unique=True)
+    project_id = Column(Text, nullable=False)
+    module_entry_id = Column(Text, nullable=False, index=True)  # 关联 PMEntry.id（module_type='product-architecture' 且 node_type='module'）
+    version_number = Column(Text, nullable=False)  # 'v1', 'v1.1'
+    change_summary = Column(Text, default='')
+    created_by = Column(Text, nullable=True)
+    created_at = Column(BigInteger)
+    project_version_id = Column(Text, nullable=True)  # 关联项目版本（pm_version.id），可选
 
 
 class PMEntryVersion(Base):
@@ -173,6 +225,7 @@ class PMProjectModel(BaseModel):
     meta: Optional[dict] = None
     created_at: int
     updated_at: int
+    current_version_id: Optional[str] = None
 
 
 class PMProjectForm(BaseModel):
@@ -186,6 +239,7 @@ class PMProjectUpdateForm(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     meta: Optional[dict] = None
+    current_version_id: Optional[str] = None
 
 
 class PMVersionModel(BaseModel):
@@ -222,8 +276,12 @@ class PMEntryModel(BaseModel):
     version: int = 1
     current_version_number: Optional[str] = None  # computed from latest entry version
     branch_name: Optional[str] = None              # computed from latest entry version
+    created_version_number: Optional[str] = None   # persisted at creation time (e.g. 'v1')
     created_at: int
     updated_at: int
+    project_version_id: Optional[str] = None  # 关联项目版本（pm_version.id）
+    source_entry_id: Optional[str] = None  # 派生源条目 ID
+    module_version_id: Optional[str] = None  # 关联模块版本（pm_module_version.id）
 
 
 class PMEntryForm(BaseModel):
@@ -234,6 +292,9 @@ class PMEntryForm(BaseModel):
     data: Optional[dict] = None
     status: Optional[str] = 'draft'
     priority: Optional[str] = None
+    project_version_id: Optional[str] = None  # 关联项目版本（pm_version.id）
+    source_entry_id: Optional[str] = None  # 派生源条目 ID
+    module_version_id: Optional[str] = None  # 关联模块版本（pm_module_version.id）
 
 
 class PMEntryUpdateForm(BaseModel):
@@ -242,6 +303,7 @@ class PMEntryUpdateForm(BaseModel):
     data: Optional[dict] = None
     status: Optional[str] = None
     priority: Optional[str] = None
+    module_version_id: Optional[str] = None  # 切换模块版本时更新
 
 
 class PMEntryVersionModel(BaseModel):
@@ -315,6 +377,31 @@ class PMEntryMergeForm(BaseModel):
     entry_id: Optional[str] = None
     branch_id: str
     target_version_id: Optional[str] = None
+
+
+####################
+# PM Module Version Pydantic Models
+####################
+
+class PMModuleVersionModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    module_entry_id: str
+    version_number: str
+    change_summary: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: int
+    project_version_id: Optional[str] = None
+
+
+class PMModuleVersionForm(BaseModel):
+    project_id: Optional[str] = None
+    module_entry_id: str
+    version_number: str
+    change_summary: Optional[str] = None
+    project_version_id: Optional[str] = None
 
 
 ####################
@@ -415,6 +502,20 @@ class PMProjects:
         self, user_id: str, form_data: PMProjectForm, db: Optional[AsyncSession] = None
     ) -> Optional[PMProjectModel]:
         async with get_async_db_context(db) as db:
+            # Pre-check for duplicate active project name for this user.
+            # The DB partial unique index (uq_pm_project_user_name_active)
+            # is the source of truth, but this raises a clearer error before
+            # the transaction and avoids IntegrityError noise in logs.
+            existing = await db.execute(
+                select(PMProject.id).where(
+                    PMProject.user_id == user_id,
+                    PMProject.name == form_data.name,
+                    PMProject.status != 'archived',
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise DuplicateProjectNameError(form_data.name)
+
             project = PMProject(
                 id=str(uuid.uuid4()),
                 user_id=user_id,
@@ -426,7 +527,14 @@ class PMProjects:
                 updated_at=int(time.time_ns()),
             )
             db.add(project)
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError as e:
+                await db.rollback()
+                # Race condition: another request inserted the same name
+                # between our pre-check and commit. Surface as the same
+                # domain-level error so the router can return 409.
+                raise DuplicateProjectNameError(form_data.name) from e
             return PMProjectModel.model_validate(project)
 
     async def get_project_by_id(
@@ -438,14 +546,13 @@ class PMProjects:
             return PMProjectModel.model_validate(project) if project else None
 
     async def get_projects_by_user_id(
-        self, user_id: str, db: Optional[AsyncSession] = None
+        self, user_id: str, db: Optional[AsyncSession] = None, include_archived: bool = False
     ) -> list[PMProjectModel]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(
-                select(PMProject)
-                .where(PMProject.user_id == user_id)
-                .order_by(PMProject.updated_at.desc())
-            )
+            query = select(PMProject).where(PMProject.user_id == user_id)
+            if not include_archived:
+                query = query.where(PMProject.status != 'archived')
+            result = await db.execute(query.order_by(PMProject.updated_at.desc()))
             return [PMProjectModel.model_validate(p) for p in result.scalars().all()]
 
     async def update_project_by_id(
@@ -457,12 +564,35 @@ class PMProjects:
             if not project:
                 return None
             update_data = form_data.model_dump(exclude_none=True)
+
+            # If name is being changed, ensure no other active project owned
+            # by the same user already has that name.
+            new_name = update_data.get('name')
+            if new_name and new_name != project.name:
+                conflict = await db.execute(
+                    select(PMProject.id).where(
+                        PMProject.user_id == project.user_id,
+                        PMProject.name == new_name,
+                        PMProject.status != 'archived',
+                        PMProject.id != project_id,
+                    )
+                )
+                if conflict.scalar_one_or_none() is not None:
+                    raise DuplicateProjectNameError(new_name)
+
             if update_data:
                 update_data['updated_at'] = int(time.time_ns())
-                await db.execute(
-                    update(PMProject).where(PMProject.id == project_id).values(**update_data)
-                )
-                await db.commit()
+                try:
+                    await db.execute(
+                        update(PMProject).where(PMProject.id == project_id).values(**update_data)
+                    )
+                    await db.commit()
+                except IntegrityError as e:
+                    await db.rollback()
+                    # Race condition fallback — same surface as pre-check.
+                    raise DuplicateProjectNameError(
+                        new_name or project.name
+                    ) from e
             result = await db.execute(select(PMProject).where(PMProject.id == project_id))
             project = result.scalar_one_or_none()
             return PMProjectModel.model_validate(project) if project else None
@@ -505,11 +635,47 @@ class PMVersions:
             )
             return [PMVersionModel.model_validate(v) for v in result.scalars().all()]
 
+    async def get_version_by_id(
+        self, version_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[PMVersionModel]:
+        """按 ID 查询单个项目版本（pm_version 表，非 pm_entry_version）。"""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(PMVersion).where(PMVersion.id == version_id))
+            version = result.scalar_one_or_none()
+            return PMVersionModel.model_validate(version) if version else None
+
 
 class PMEntries:
     async def insert_new_entry(
         self, user_id: str, form_data: PMEntryForm, db: Optional[AsyncSession] = None
     ) -> Optional[PMEntryModel]:
+        # J4/D70: 校验关键字段，防止 Bug 5 幻影 entry silently 创建
+        # 即使 J1-J3 修复不到位，这里也能拦截 project_id="" / title="" 的幻影写入
+        # 抛 ValueError 让 engine.py 的 _execute_pm_module_node catch 并标记节点 failed
+        if not form_data.project_id:
+            logger.error(
+                "[Bug5-Diag] J4 insert_new_entry rejected: project_id empty (user_id=%s module_type=%s title=%s)",
+                user_id, form_data.module_type, form_data.title,
+            )
+            raise ValueError("insert_new_entry: project_id 不能为空（可能是 _resolve_variables 解析失败）")
+        if not form_data.module_type:
+            logger.error(
+                "[Bug5-Diag] J4 insert_new_entry rejected: module_type empty (user_id=%s project_id=%s)",
+                user_id, form_data.project_id,
+            )
+            raise ValueError("insert_new_entry: module_type 不能为空")
+        if not form_data.title or not form_data.title.strip():
+            logger.error(
+                "[Bug5-Diag] J4 insert_new_entry rejected: title empty (project_id=%s module_type=%s)",
+                form_data.project_id, form_data.module_type,
+            )
+            raise ValueError("insert_new_entry: title 不能为空")
+        # data 允许空 dict（合法场景：只写 title/content），但日志标记便于排查
+        if not form_data.data:
+            logger.warning(
+                "[Bug5-Diag] J4 insert_new_entry with empty data: project_id=%s module_type=%s title=%s",
+                form_data.project_id, form_data.module_type, form_data.title,
+            )
         async with get_async_db_context(db) as db:
             entry = PMEntry(
                 id=str(uuid.uuid4()),
@@ -522,8 +688,12 @@ class PMEntries:
                 status=form_data.status or 'draft',
                 priority=form_data.priority,
                 version=1,
+                created_version_number='v1',  # persisted at creation time; matches the initial 'v1' entry version
                 created_at=int(time.time_ns()),
                 updated_at=int(time.time_ns()),
+                project_version_id=form_data.project_version_id,
+                source_entry_id=form_data.source_entry_id,
+                module_version_id=form_data.module_version_id,
             )
             db.add(entry)
             await db.commit()
@@ -721,9 +891,59 @@ class PMEntryMerges:
             return [PMEntryMergeModel.model_validate(m) for m in result.scalars().all()]
 
 
+class PMModuleVersions:
+    """模块版本 CRUD — 管理产品架构模块的多版本。"""
+
+    async def insert_new_version(
+        self, user_id: str, form_data: PMModuleVersionForm, db: Optional[AsyncSession] = None
+    ) -> Optional[PMModuleVersionModel]:
+        async with get_async_db_context(db) as db:
+            version = PMModuleVersion(
+                id=str(uuid.uuid4()),
+                project_id=form_data.project_id or '',
+                module_entry_id=form_data.module_entry_id,
+                version_number=form_data.version_number,
+                change_summary=form_data.change_summary or '',
+                created_by=user_id,
+                created_at=int(time.time_ns()),
+                project_version_id=form_data.project_version_id,
+            )
+            db.add(version)
+            await db.commit()
+            return PMModuleVersionModel.model_validate(version)
+
+    async def get_versions_by_module_entry_id(
+        self, module_entry_id: str, db: Optional[AsyncSession] = None
+    ) -> list[PMModuleVersionModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(PMModuleVersion)
+                .where(PMModuleVersion.module_entry_id == module_entry_id)
+                .order_by(PMModuleVersion.created_at.desc())
+            )
+            return [PMModuleVersionModel.model_validate(v) for v in result.scalars().all()]
+
+    async def get_version_by_id(
+        self, version_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[PMModuleVersionModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(PMModuleVersion).where(PMModuleVersion.id == version_id))
+            version = result.scalar_one_or_none()
+            return PMModuleVersionModel.model_validate(version) if version else None
+
+    async def delete_version_by_id(
+        self, version_id: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        async with get_async_db_context(db) as db:
+            await db.execute(delete(PMModuleVersion).where(PMModuleVersion.id == version_id))
+            await db.commit()
+            return True
+
+
 PMEntryVersions = PMEntryVersions()
 PMEntryBranches = PMEntryBranches()
 PMEntryMerges = PMEntryMerges()
+PMModuleVersions = PMModuleVersions()
 
 
 ####################

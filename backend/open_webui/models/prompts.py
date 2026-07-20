@@ -34,6 +34,10 @@ class Prompt(Base):  # versioned template
     meta = Column(JSON, nullable=True)  # freeform metadata (description, etc.)
     tags = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
+    # 是否为角色提示词（Part B：AI 创建工作流 + 角色提示词）
+    # True 表示该 prompt 作为"角色"使用，data 字段存储角色配置
+    # （system_prompt / tools / suggested_models 等结构化字段）
+    is_role = Column(Boolean, default=False, nullable=False)
     version_id = Column(Text, nullable=True)  # Points to active history entry
     created_at = Column(BigInteger, nullable=True)
     updated_at = Column(BigInteger, nullable=True)
@@ -49,6 +53,7 @@ class PromptModel(BaseModel):
     meta: dict | None = None
     tags: list[str | None] = None
     is_active: bool | None = True
+    is_role: bool | None = False
     version_id: str | None = None
     created_at: int | None = None
     updated_at: int | None = None
@@ -718,6 +723,140 @@ class PromptsTable:
                 return sorted(list(tags))
         except Exception:
             return []
+
+    # ===== Part B: 角色提示词 =====
+
+    async def get_roles(self, db: AsyncSession | None = None) -> list[PromptUserResponse]:
+        """返回所有 is_role=True 的 prompt，按 updated_at 倒序。"""
+        async with get_async_db_context(db) as session:
+            active = (
+                (
+                    await session.execute(
+                        select(Prompt)
+                        .where(Prompt.is_active.is_(True))
+                        .where(Prompt.is_role.is_(True))
+                        .order_by(Prompt.updated_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            user_ids = list(set(p.user_id for p in active))
+            prompt_ids = [p.id for p in active]
+
+            users = await Users.get_users_by_user_ids(user_ids, db=session) if user_ids else []
+            users_dict = {u.id: u for u in users}
+            grants_map = await AccessGrants.get_grants_by_resources('prompt', prompt_ids, db=session)
+
+            prompts = []
+            for prompt in active:
+                user = users_dict.get(prompt.user_id)
+                prompts.append(
+                    PromptUserResponse.model_validate(
+                        {
+                            **(
+                                await self._to_prompt_model(
+                                    prompt,
+                                    access_grants=grants_map.get(prompt.id, []),
+                                    db=session,
+                                )
+                            ).model_dump(),
+                            'user': user.model_dump() if user else None,
+                        }
+                    )
+                )
+            return prompts
+
+    async def get_roles_by_user_id(
+        self, user_id: str, permission: str = 'read', db: AsyncSession | None = None
+    ) -> list[PromptUserResponse]:
+        """返回当前用户可访问的所有角色提示词。"""
+        async with get_async_db_context(db) as session:
+            user_groups = await Groups.get_groups_by_member_id(user_id, db=session)
+            user_group_ids = [group.id for group in user_groups]
+
+            query = (
+                select(Prompt)
+                .filter(Prompt.is_active == True)
+                .filter(Prompt.is_role == True)
+                .order_by(Prompt.updated_at.desc())
+            )
+            query = AccessGrants.has_permission_filter(
+                db=db,
+                query=query,
+                DocumentModel=Prompt,
+                filter={'user_id': user_id, 'group_ids': user_group_ids},
+                resource_type='prompt',
+                permission=permission,
+            )
+
+            result = await session.execute(query)
+            accessible_prompts = result.scalars().all()
+
+            if not accessible_prompts:
+                return []
+
+            prompt_ids = [p.id for p in accessible_prompts]
+            owner_ids = list({p.user_id for p in accessible_prompts})
+
+            users = await Users.get_users_by_user_ids(owner_ids, db=session)
+            users_dict = {u.id: u for u in users}
+            grants_map = await AccessGrants.get_grants_by_resources('prompt', prompt_ids, db=session)
+
+            results = []
+            for prompt in accessible_prompts:
+                user = users_dict.get(prompt.user_id)
+                results.append(
+                    PromptUserResponse.model_validate(
+                        {
+                            **(
+                                await self._to_prompt_model(
+                                    prompt,
+                                    access_grants=grants_map.get(prompt.id, []),
+                                    db=db,
+                                )
+                            ).model_dump(),
+                            'user': user.model_dump() if user else None,
+                        }
+                    )
+                )
+            return results
+
+    async def set_role_flag(
+        self,
+        prompt_id: str,
+        is_role: bool,
+        role_data: dict | None = None,
+        db: AsyncSession | None = None,
+    ) -> PromptModel | None:
+        """设置 prompt 的 is_role 标志，可选地更新 data 字段。
+
+        - is_role=True 且 role_data 非空：将 role_data 合并到 prompt.data
+          （role_data 期望包含 system_prompt / tools / suggested_models 等字段）
+        - is_role=False：仅清除标志，保留 data 内容（以便后续重新升级）
+        """
+        try:
+            async with get_async_db_context(db) as session:
+                result = await session.execute(select(Prompt).filter_by(id=prompt_id))
+                prompt = result.scalars().first()
+                if not prompt:
+                    return None
+
+                prompt.is_role = is_role
+                if is_role and role_data is not None:
+                    # 合并 role_data 到现有 data
+                    existing_data = prompt.data or {}
+                    existing_data.update(role_data)
+                    prompt.data = existing_data
+
+                prompt.updated_at = int(time.time())
+                await session.commit()
+                await session.refresh(prompt)
+                return await self._to_prompt_model(prompt, db=session)
+        except Exception as e:
+            log.error(f'Failed to set role flag for prompt {prompt_id}: {e}')
+            return None
 
 
 Prompts = PromptsTable()  # singleton prompts registry
