@@ -502,6 +502,7 @@ from open_webui.routers import (
     pipelines,
     pm,
     permissions,
+    audit_logs,
     prompts,
     retrieval,
     scim,
@@ -1463,6 +1464,7 @@ app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 app.include_router(permissions.router, prefix='/api/v1/permissions', tags=['permissions'])
+app.include_router(audit_logs.router, prefix='/api/v1/audit-logs', tags=['audit_logs'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
