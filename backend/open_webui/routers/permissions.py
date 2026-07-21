@@ -2,16 +2,19 @@
 
 所有写操作 (grant / revoke) 仅 admin. 读操作 (list) 任何认证用户可查
 (返回结果不含敏感字段, 仅 principal_type/principal_id/level).
+
+#37: 所有 grant/revoke 操作写入 pm_audit_log 审计表.
 """
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.acl import ADMIN_ROLE
 from open_webui.models.permissions import Permissions
+from open_webui.models.audit_logs import AuditLogs
 
 log = logging.getLogger(__name__)
 
@@ -31,11 +34,13 @@ class PermissionGrantForm(BaseModel):
 @router.post("/")
 async def grant_permission(
     form: PermissionGrantForm,
+    request: Request,
     user=Depends(get_verified_user),
 ):
     """授予某 principal 对某资源的权限 (仅 admin).
 
     #33: 仅 admin 可调用. 同主键 upsert (更新 level).
+    #37: 写入审计日志.
     """
     if user.role != ADMIN_ROLE:
         raise HTTPException(status_code=403, detail="Only admin can grant permissions")
@@ -56,6 +61,25 @@ async def grant_permission(
         level=form.level,
         granted_by=user.id,
     )
+
+    # #37 审计: 记录授权操作
+    await AuditLogs.record(
+        action="grant",
+        resource_type="permission",
+        actor_user_id=user.id,
+        actor_role=user.role,
+        resource_id=perm.id,
+        detail={
+            "target_resource_type": form.resource_type,
+            "target_resource_id": form.resource_id,
+            "principal_type": form.principal_type,
+            "principal_id": form.principal_id,
+            "level": form.level,
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     return {"id": perm.id, "level": perm.level}
 
 
@@ -85,16 +109,31 @@ async def list_permissions(
 @router.delete("/{permission_id}")
 async def revoke_permission(
     permission_id: str,
+    request: Request,
     user=Depends(get_verified_user),
 ):
     """撤销 grant (仅 admin).
 
     #33: 仅 admin 可调用.
+    #37: 写入审计日志.
     """
     if user.role != ADMIN_ROLE:
         raise HTTPException(status_code=403, detail="Only admin can revoke permissions")
 
     ok = await Permissions.revoke(permission_id)
+
+    # #37 审计: 无论成功失败都记录尝试 (失败表示 id 不存在)
+    await AuditLogs.record(
+        action="revoke",
+        resource_type="permission",
+        actor_user_id=user.id,
+        actor_role=user.role,
+        resource_id=permission_id,
+        detail={"success": ok},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     if not ok:
         raise HTTPException(status_code=404, detail="Permission not found")
     return {"deleted": permission_id}
