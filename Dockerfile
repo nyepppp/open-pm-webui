@@ -19,9 +19,9 @@ ARG USE_AUXILIARY_EMBEDDING_MODEL=TaylorAI/bge-micro-v2
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
 ARG BUILD_HASH=dev-build
-# Override at your own risk - non-root configurations are untested
-ARG UID=0
-ARG GID=0
+# #36 安全治理: 默认非 root 运行 (UID/GID 1000). 构建时可通过 --build-arg 覆盖.
+ARG UID=1000
+ARG GID=1000
 
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
@@ -108,7 +108,7 @@ ENV HF_HOME="/app/backend/data/cache/embedding/models"
 
 WORKDIR /app/backend
 
-ENV HOME=/root
+ENV HOME=/home/app
 # Create user and group if not root
 RUN if [ $UID -ne 0 ]; then \
     if [ $GID -ne 0 ]; then \
