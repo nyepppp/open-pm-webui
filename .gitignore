@@ -344,5 +344,5 @@ loop-budget.md
 check_output.txt
 nul
 
-# Trellis workspace state (per-developer journals)
-.trellis/workspace/
+# Trellis workspace state (per-developer journals, specs, tasks, hooks)
+.trellis/
