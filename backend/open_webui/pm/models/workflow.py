@@ -26,6 +26,11 @@ class Workflow(Base):
     nodes = Column(Text, default="[]")  # JSON string
     edges = Column(Text, default="[]")  # JSON string
     execution_history = Column(Text, default="[]")  # JSON string
+    # Issue #29: ownership + ACL. owner_id is the user_id of the workflow creator.
+    # acl is a JSON string like '{"read": [], "write": []}' for future RBAC extensions;
+    # for now owner-only access is enforced at the router layer via require_workflow_owner.
+    owner_id = Column(Text, nullable=True)  # backfilled by migration b9c0d1e2f3a4
+    acl = Column(Text, default='{"read": [], "write": []}')  # JSON string
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
 
@@ -75,6 +80,10 @@ class WorkflowExecution(Base):
     output_data = Column(Text, default="{}")  # JSON string
     node_states = Column(Text, default="[]")  # JSON string
     logs = Column(Text, default="[]")  # JSON string
+    # Issue #29: track who triggered the execution and in which project context.
+    # Used by audit (Phase 4) and ACL checks on execution status endpoints.
+    user_id = Column(Text, nullable=True)  # backfilled by migration b9c0d1e2f3a4
+    project_id = Column(Text, nullable=True)  # backfilled by migration b9c0d1e2f3a4
     started_at = Column(BigInteger)
     completed_at = Column(BigInteger, nullable=True)
     error_message = Column(Text, nullable=True)
@@ -95,6 +104,9 @@ class WorkflowModel(BaseModel):
     nodes: str = "[]"
     edges: str = "[]"
     execution_history: str = "[]"
+    # Issue #29: ownership + ACL fields
+    owner_id: Optional[str] = None
+    acl: Optional[str] = '{"read": [], "write": []}'
     created_at: Optional[int] = None
     updated_at: Optional[int] = None
 
@@ -144,6 +156,9 @@ class WorkflowExecutionModel(BaseModel):
     output_data: str = "{}"
     node_states: str = "[]"
     logs: str = "[]"
+    # Issue #29: who triggered + project context
+    user_id: Optional[str] = None
+    project_id: Optional[str] = None
     started_at: int
     completed_at: Optional[int] = None
     error_message: Optional[str] = None
@@ -204,9 +219,17 @@ class Workflows:
     """CRUD operations for Workflow."""
 
     async def insert_new_workflow(
-        self, form_data: WorkflowForm, db: Optional[AsyncSession] = None
+        self, form_data: WorkflowForm, owner_id: Optional[str] = None, db: Optional[AsyncSession] = None
     ) -> Optional[WorkflowModel]:
-        """Create a new workflow."""
+        """Create a new workflow.
+
+        Args:
+            form_data: Workflow form fields (does NOT carry owner_id — kept out of
+                the wire form so clients cannot spoof ownership).
+            owner_id: The authenticated user's id. Required for proper ACL; if
+                None (legacy callers), the row will have NULL owner_id and the
+                migration b9c0d1e2f3a4 backfill will assign it to the first admin.
+        """
         async with get_async_db_context(db) as db:
             # Handle project_ids -> project_id mapping
             project_id = form_data.project_id
@@ -223,6 +246,8 @@ class Workflows:
                 nodes=form_data.nodes,
                 edges=form_data.edges,
                 execution_history="[]",
+                owner_id=owner_id,
+                acl='{"read": [], "write": []}',
                 created_at=int(time.time_ns()),
                 updated_at=int(time.time_ns()),
             )
@@ -232,19 +257,21 @@ class Workflows:
             except Exception as e:
                 await db.rollback()
                 log.error(
-                    "insert_new_workflow failed: workflow_id=%s name=%r project_id=%s error=%s",
+                    "insert_new_workflow failed: workflow_id=%s name=%r project_id=%s owner_id=%s error=%s",
                     workflow_id,
                     form_data.name,
                     project_id,
+                    owner_id,
                     e,
                     exc_info=True,
                 )
                 raise
             log.info(
-                "insert_new_workflow ok: workflow_id=%s name=%r project_id=%s",
+                "insert_new_workflow ok: workflow_id=%s name=%r project_id=%s owner_id=%s",
                 workflow_id,
                 form_data.name,
                 project_id,
+                owner_id,
             )
             return WorkflowModel.model_validate(workflow)
 
@@ -299,6 +326,31 @@ class Workflows:
         """Get all workflows."""
         async with get_async_db_context(db) as db:
             result = await db.execute(select(Workflow))
+            return [
+                WorkflowModel.model_validate(w)
+                for w in result.scalars().all()
+            ]
+
+    async def get_workflows_for_user(
+        self, user_id: str, role: str, db: Optional[AsyncSession] = None
+    ) -> list[WorkflowModel]:
+        """Get workflows accessible to the given user.
+
+        Issue #29: admins see all workflows; non-admins only see workflows they own.
+        Workflows with NULL owner_id (legacy rows not yet backfilled) are visible
+        only to admins — non-admins will gain access once the migration backfill
+        assigns ownership.
+        """
+        async with get_async_db_context(db) as db:
+            if role == 'admin':
+                stmt = select(Workflow).order_by(Workflow.updated_at.desc())
+            else:
+                stmt = (
+                    select(Workflow)
+                    .where(Workflow.owner_id == user_id)
+                    .order_by(Workflow.updated_at.desc())
+                )
+            result = await db.execute(stmt)
             return [
                 WorkflowModel.model_validate(w)
                 for w in result.scalars().all()
@@ -471,9 +523,21 @@ class WorkflowExecutions:
     """CRUD operations for WorkflowExecution."""
 
     async def insert_new_execution(
-        self, form_data: WorkflowExecutionForm, db: Optional[AsyncSession] = None
+        self,
+        form_data: WorkflowExecutionForm,
+        user_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[WorkflowExecutionModel]:
-        """Create a new workflow execution."""
+        """Create a new workflow execution.
+
+        Args:
+            form_data: Execution form fields.
+            user_id: The authenticated user who triggered this execution (Issue #29).
+                Used by audit (Phase 4) and ACL on execution status endpoints.
+            project_id: The project context for this execution, derived from the
+                workflow's project_id at the router layer.
+        """
         async with get_async_db_context(db) as db:
             execution = WorkflowExecution(
                 id=str(uuid.uuid4()),
@@ -483,6 +547,8 @@ class WorkflowExecutions:
                 output_data=form_data.output_data,
                 node_states=form_data.node_states,
                 logs=form_data.logs,
+                user_id=user_id,
+                project_id=project_id,
                 started_at=int(time.time_ns()),
                 completed_at=None,
                 error_message=form_data.error_message,
