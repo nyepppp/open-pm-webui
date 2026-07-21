@@ -835,7 +835,11 @@ class WorkflowExecutionEngine:
         }
 
     async def _execute_agent_call_node(self, config: Dict, context: ExecutionContext) -> Dict:
-        """Execute an agent call node with OpenWebUI LLM integration."""
+        """Execute an agent call node with OpenWebUI LLM integration.
+
+        #34: 响应脱敏 (D4 默认开, 不可关) — 在 return 前对 output 做 sanitize.
+        """
+        from open_webui.services.workflow.response_sanitizer import sanitize as sanitize_response
         try:
             agent_id = config.get("agent_id")
             prompt = config.get("prompt", "")
@@ -876,7 +880,7 @@ class WorkflowExecutionEngine:
                         if choices:
                             response_text = choices[0].get("message", {}).get("content", "")
                     
-                    return {
+                    result = {
                         "status": "completed",
                         "output": {
                             "agent_id": agent_id,
@@ -889,6 +893,9 @@ class WorkflowExecutionEngine:
                             }
                         }
                     }
+                    # #34 响应脱敏: 阻断 LLM 输出中的 API key / 私钥 / PII 泄露
+                    result["output"] = sanitize_response(result["output"])
+                    return result
                 except Exception as e:
                     logger.warning(f"LLM integration failed, falling back to simulation: {e}")
             
@@ -897,7 +904,7 @@ class WorkflowExecutionEngine:
             # 让 BFS 误以为节点成功，下游节点拿到占位符文本继续装作完成 —— 用户看到 100% completed 但数据没通
             await asyncio.sleep(0.1)
             
-            return {
+            result = {
                 "status": "failed",
                 "output": {
                     "error": f"agent_call LLM 调用失败或无 request/user 上下文（model={model}, prompt={resolved_prompt[:50]}...）",
@@ -906,6 +913,9 @@ class WorkflowExecutionEngine:
                     "model": model
                 }
             }
+            # #34 失败路径同样脱敏 (error 字段可能含敏感信息)
+            result["output"] = sanitize_response(result["output"])
+            return result
             
         except Exception as e:
             logger.error(f"Agent call failed: {e}", exc_info=True)
@@ -1340,21 +1350,56 @@ print(json.dumps({{k: v for k, v in locals().items() if not k.startswith('_') an
     # ==================== 新增 7 个 executor 方法 ====================
 
     async def _execute_http_request_node(self, config: Dict, context: ExecutionContext) -> Dict:
-        """执行 HTTP 请求节点。"""
+        """执行 HTTP 请求节点 (含 SSRF 防护, #32).
+
+        防护策略 (D3):
+        - URL/IP/DNS 三层校验 (network_guard.validate_url)
+        - 禁用 redirect (allow_redirects=False) 防止 302 跳内网
+        - 默认 10s 超时, 1MiB 响应大小限制
+        - 响应头脱敏 (sanitize_response_headers)
+        """
+        from open_webui.services.workflow.network_guard import (
+            validate_url,
+            SSRFError,
+            sanitize_response_headers,
+            DEFAULT_TIMEOUT_SECONDS,
+            DEFAULT_MAX_RESPONSE_BYTES,
+        )
         try:
             import aiohttp
             method = config.get("method", "GET").upper()
             url = self._resolve_variables(str(config.get("url", "")), context)
+
+            # SSRF 校验: 协议白名单 + DNS 解析 + IP 黑名单
+            try:
+                host, resolved_ip = validate_url(url)
+                logger.info("HTTP node -> %s (resolved %s)", host, resolved_ip)
+            except SSRFError as e:
+                logger.warning("SSRF blocked: %s (url=%s)", e, url)
+                return {
+                    "status": "failed",
+                    "error": f"URL not allowed: {e}",
+                    "output": None,
+                }
+
             headers = config.get("headers", {})
             body = config.get("body", "")
             if body and isinstance(body, str):
                 body = self._resolve_variables(body, context)
-            
-            async with aiohttp.ClientSession() as session:
+
+            timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT_SECONDS)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # 禁用 redirect — 防止 302 跳转到内网
                 async with session.request(
-                    method, url, headers=headers, data=body if body else None
+                    method,
+                    url,
+                    headers=headers,
+                    data=body if body else None,
+                    allow_redirects=False,
                 ) as response:
-                    response_text = await response.text()
+                    # 限制响应体大小, 防止大响应耗尽内存
+                    body_bytes = await response.content.read(DEFAULT_MAX_RESPONSE_BYTES)
+                    response_text = body_bytes.decode("utf-8", errors="replace")
                     try:
                         response_data = json.loads(response_text)
                     except json.JSONDecodeError:
@@ -1363,7 +1408,7 @@ print(json.dumps({{k: v for k, v in locals().items() if not k.startswith('_') an
                         "status": "completed",
                         "output": {
                             "status_code": response.status,
-                            "headers": dict(response.headers),
+                            "headers": sanitize_response_headers(dict(response.headers)),
                             "body": response_data,
                         }
                     }

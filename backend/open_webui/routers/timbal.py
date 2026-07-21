@@ -1,5 +1,11 @@
-"""FastAPI router for Timbal integration."""
+"""FastAPI router for Timbal integration.
 
+#30 安全治理: 除 /healthcheck 外, 所有端点强制 get_verified_user 认证.
+ACL 降级策略 (D2): Timbal workflow_id 与 pm_workflows.id 关系不确定,
+Phase 2 仅强制认证, Phase 3 RBAC 完成后再收紧为基于扩展权限模型的检查.
+"""
+
+import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any, Optional
@@ -16,6 +22,10 @@ sys.path.insert(0, os.path.join(_backend_dir, 'lib'))
 from timbal.execution_service import WorkflowExecutionService
 from timbal.models import TimbalWorkflow, TimbalExecution, TimbalConfig
 from timbal.client import TimbalClient
+
+from open_webui.utils.auth import get_verified_user
+
+log = logging.getLogger(__name__)
 
 
 router = APIRouter(tags=["timbal"])
@@ -96,9 +106,13 @@ async def healthcheck():
 @router.post("/workflows/{workflow_id}/execute")
 async def execute_workflow(
     workflow_id: str,
-    request: ExecuteWorkflowRequest
+    request: ExecuteWorkflowRequest,
+    user=Depends(get_verified_user),
 ):
-    """Execute a workflow."""
+    """Execute a workflow.
+
+    #30: 强制认证. ACL 降级为"已登录即可"(D2), Phase 3 收紧.
+    """
     try:
         service = get_execution_service()
         workflow = TimbalWorkflow(id=workflow_id, name="", nodes=[], edges=[])
@@ -111,8 +125,15 @@ async def execute_workflow(
 
 
 @router.get("/workflows/{workflow_id}/stream")
-async def stream_workflow(workflow_id: str, inputs: Dict[str, Any]):
-    """Stream workflow execution via SSE."""
+async def stream_workflow(
+    workflow_id: str,
+    inputs: Dict[str, Any],
+    user=Depends(get_verified_user),
+):
+    """Stream workflow execution via SSE.
+
+    #30: 强制认证. ACL 降级为"已登录即可"(D2), Phase 3 收紧.
+    """
     async def event_generator():
         service = get_execution_service()
         workflow = TimbalWorkflow(id=workflow_id, name="", nodes=[], edges=[])
@@ -130,8 +151,14 @@ async def stream_workflow(workflow_id: str, inputs: Dict[str, Any]):
 
 
 @router.get("/executions/{execution_id}")
-async def get_execution_status(execution_id: str):
-    """Get execution status."""
+async def get_execution_status(
+    execution_id: str,
+    user=Depends(get_verified_user),
+):
+    """Get execution status.
+
+    #30: 强制认证. ACL 降级为"已登录即可"(D2), Phase 3 收紧.
+    """
     service = get_execution_service()
     execution = await service.get_execution_status(execution_id)
     
@@ -142,8 +169,14 @@ async def get_execution_status(execution_id: str):
 
 
 @router.post("/executions/{execution_id}/stop")
-async def stop_execution(execution_id: str):
-    """Stop a running execution."""
+async def stop_execution(
+    execution_id: str,
+    user=Depends(get_verified_user),
+):
+    """Stop a running execution.
+
+    #30: 强制认证. ACL 降级为"已登录即可"(D2), Phase 3 收紧.
+    """
     service = get_execution_service()
     execution = await service.stop_execution(execution_id)
     
