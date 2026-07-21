@@ -17,6 +17,7 @@ from open_webui.pm.models.workflow import (
 )
 from open_webui.pm.services.workflow_service import WorkflowService
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.acl import require_workflow_owner
 from open_webui.services.workflow.ai_generator import ai_workflow_generator
 from open_webui.services.workflow.bpmn_converter import bpmn_converter
 from open_webui.services.workflow.json_converter import json_converter
@@ -77,7 +78,7 @@ async def create_workflow(
                 "all_errors": [e.model_dump() for e in validation_errors],
             },
         )
-    workflow = await WorkflowService.create_workflow(form_data)
+    workflow = await WorkflowService.create_workflow(form_data, owner_id=user.id)
     if not workflow:
         raise HTTPException(status_code=400, detail="Failed to create workflow")
     return _parse_workflow_json(workflow)
@@ -89,7 +90,8 @@ async def get_workflows(
     user=Depends(get_verified_user),
 ):
     """Get all workflows for the current user."""
-    workflows = await WorkflowService.get_all_workflows()
+    # ACL (#29): 普通用户仅看自己的，admin 看全部
+    workflows = await WorkflowService.get_workflows_for_user(user.id, user.role)
     return [_parse_workflow_json(w) for w in workflows]
 
 
@@ -222,7 +224,10 @@ async def get_workflow(
 ):
     """Get workflow by ID."""
     try:
-        workflow = await WorkflowService.get_workflow(workflow_id)
+        # ACL (#29): 加载并校验 ownership，非 Owner/Admin → 403
+        workflow = await WorkflowService.get_workflow_with_access_check(
+            workflow_id, user.id, user.role
+        )
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         return _parse_workflow_json(workflow)
@@ -249,6 +254,13 @@ async def update_workflow(
     user=Depends(get_verified_user),
 ):
     """Update a workflow."""
+    # ACL (#29): 校验 ownership 后再更新
+    existing = await WorkflowService.get_workflow_with_access_check(
+        workflow_id, user.id, user.role
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
     # 保存前校验节点引用的扩展资源是否存在
     nodes = _parse_nodes_from_form(form_data)
     validation_errors = await _validate_workflow_references(nodes)
@@ -276,6 +288,12 @@ async def delete_workflow(
     user=Depends(get_verified_user),
 ):
     """Delete a workflow."""
+    # ACL (#29): 校验 ownership 后再删除
+    existing = await WorkflowService.get_workflow_with_access_check(
+        workflow_id, user.id, user.role
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Workflow not found")
     success = await WorkflowService.delete_workflow(workflow_id)
     if not success:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -291,7 +309,10 @@ async def execute_workflow(
 ):
     """Execute a workflow using the execution engine."""
     try:
-        workflow = await WorkflowService.get_workflow(workflow_id)
+        # ACL (#29): 加载并校验 ownership，非 Owner/Admin → 403
+        workflow = await WorkflowService.get_workflow_with_access_check(
+            workflow_id, user.id, user.role
+        )
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -302,7 +323,8 @@ async def execute_workflow(
             workflow_id=workflow_id,
             input_data=input_data,
             user_id=user.id if user else None,
-            chat_model_id=chat_model_id
+            chat_model_id=chat_model_id,
+            project_id=workflow.get("project_id"),
         )
 
         return {
@@ -329,6 +351,10 @@ async def get_execution_status(
         status = await workflow_execution_engine.get_execution_status(execution_id)
         if not status:
             raise HTTPException(status_code=404, detail="Execution not found")
+        # ACL (#29): 通过 execution→workflow 链校验 ownership。优先用 status 中
+        # 的 workflow_id（覆盖 awaiting_input 场景），回退到 path 参数。
+        wf_id = status.get("workflow_id") or workflow_id
+        await WorkflowService.get_workflow_with_access_check(wf_id, user.id, user.role)
         return status
     except HTTPException:
         raise
@@ -354,6 +380,15 @@ async def resume_workflow_run(
     engine 唤醒对应 asyncio.Event，继续执行下游节点。
     """
     try:
+        # ACL (#29): 先通过 execution→workflow 链校验 ownership，再唤醒
+        status = await workflow_execution_engine.get_execution_status(execution_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        wf_id = status.get("workflow_id")
+        if not wf_id:
+            raise HTTPException(status_code=404, detail="Workflow not found for execution")
+        await WorkflowService.get_workflow_with_access_check(wf_id, user.id, user.role)
+
         ok = await workflow_execution_engine.resume_human_input(
             execution_id, body.node_id, body.response
         )
@@ -378,16 +413,19 @@ async def export_workflow_json(
     user=Depends(get_verified_user),
 ):
     """Export workflow to JSON format."""
-    workflow = await WorkflowService.get_workflow(workflow_id)
+    # ACL (#29): 校验 ownership 后再导出
+    workflow = await WorkflowService.get_workflow_with_access_check(
+        workflow_id, user.id, user.role
+    )
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    
+
     # Parse nodes and edges
     workflow_data = _parse_workflow_json(workflow)
-    
+
     # Convert to JSON
     json_content = json_converter.workflow_to_json(workflow_data)
-    
+
     return {
         "content": json_content,
         "filename": f"{workflow_data.get('name', 'workflow').replace(' ', '_')}.json",
@@ -402,16 +440,19 @@ async def export_workflow_bpmn(
     user=Depends(get_verified_user),
 ):
     """Export workflow to BPMN 2.0 XML format."""
-    workflow = await WorkflowService.get_workflow(workflow_id)
+    # ACL (#29): 校验 ownership 后再导出
+    workflow = await WorkflowService.get_workflow_with_access_check(
+        workflow_id, user.id, user.role
+    )
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    
+
     # Parse nodes and edges
     workflow_data = _parse_workflow_json(workflow)
-    
+
     # Convert to BPMN
     bpmn_content = bpmn_converter.workflow_to_bpmn(workflow_data)
-    
+
     return {
         "content": bpmn_content,
         "filename": f"{workflow_data.get('name', 'workflow').replace(' ', '_')}.bpmn",
@@ -441,11 +482,12 @@ async def import_workflow_json(
             nodes=json.dumps(workflow_data.get("nodes", [])),
             edges=json.dumps(workflow_data.get("edges", [])),
         )
-        
-        workflow = await WorkflowService.create_workflow(form_data)
+
+        # ACL (#29): 导入时注入 owner_id = 当前用户
+        workflow = await WorkflowService.create_workflow(form_data, owner_id=user.id)
         if not workflow:
             raise HTTPException(status_code=400, detail="Failed to create workflow")
-        
+
         return _parse_workflow_json(workflow)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
@@ -464,10 +506,10 @@ async def import_workflow_bpmn(
         bpmn_content = body.get("content", "")
         if not bpmn_content:
             raise HTTPException(status_code=400, detail="No content provided")
-        
+
         # Parse BPMN
         workflow_data = bpmn_converter.bpmn_to_workflow(bpmn_content)
-        
+
         # Create workflow
         form_data = WorkflowForm(
             name=workflow_data.get("name", "Imported Workflow"),
@@ -475,8 +517,9 @@ async def import_workflow_bpmn(
             nodes=json.dumps(workflow_data.get("nodes", [])),
             edges=json.dumps(workflow_data.get("edges", [])),
         )
-        
-        workflow = await WorkflowService.create_workflow(form_data)
+
+        # ACL (#29): 导入时注入 owner_id = 当前用户
+        workflow = await WorkflowService.create_workflow(form_data, owner_id=user.id)
         if not workflow:
             raise HTTPException(status_code=400, detail="Failed to create workflow")
         
@@ -697,17 +740,26 @@ async def get_execution_node_detail(
 ):
     """返回某次执行中某节点的运行时详情：input / output / tool_call 详情 / write_target 结果 / 耗时。"""
     try:
+        # ACL (#29): 先校验 workflow ownership（path 含 workflow_id，直接校验）
+        workflow = await WorkflowService.get_workflow_with_access_check(
+            workflow_id, user.id, user.role
+        )
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
         status = await workflow_execution_engine.get_execution_status(execution_id)
         if not status:
             raise HTTPException(status_code=404, detail="Execution not found")
-        node_results = status.get("node_results", {}) or {}
+        # 防御：execution 所属 workflow 必须与 path 中一致，防止通过 path 伪造
+        if status.get("workflow_id") and status["workflow_id"] != workflow_id:
+            raise HTTPException(status_code=404, detail="Execution does not belong to this workflow")
+        node_results = status.get("node_result", {}) or {}
         if node_id not in node_results:
             raise HTTPException(status_code=404, detail=f"Node {node_id} not found in execution {execution_id}")
         node_result = node_results[node_id]
         # 从 workflow 节点定义中取节点名和类型
         node_name = node_id
         node_type = "unknown"
-        workflow = await WorkflowService.get_workflow(workflow_id)
         if workflow:
             try:
                 nodes = json.loads(workflow.get("nodes", "[]")) if isinstance(workflow.get("nodes"), str) else workflow.get("nodes", [])

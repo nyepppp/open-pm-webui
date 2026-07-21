@@ -28,6 +28,11 @@ from open_webui.models.pm import (
     PMRelationModel,
     DuplicateProjectNameError,
 )
+from open_webui.utils.acl import (
+    require_entry_access,
+    require_owner,
+    require_project_access,
+)
 from open_webui.utils.auth import get_verified_user
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -185,10 +190,8 @@ async def get_project(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    project = await PMProjects.get_project_by_id(project_id, db=db)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
-    return project
+    # ACL (#27): 非 Owner/Admin 返回 404/403，避免泄露项目存在性
+    return await require_project_access(project_id, user.id, user.role, db)
 
 
 @router.post('/projects/{project_id}', response_model=PMProjectModel)
@@ -198,6 +201,8 @@ async def update_project(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27): 校验 Owner/Admin
+    await require_project_access(project_id, user.id, user.role, db)
     try:
         project = await PMProjects.update_project_by_id(project_id, form_data, db=db)
     except DuplicateProjectNameError as e:
@@ -216,6 +221,8 @@ async def delete_project(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27): 校验 Owner/Admin
+    await require_project_access(project_id, user.id, user.role, db)
     await PMProjects.delete_project_by_id(project_id, db=db)
     return True
 
@@ -235,12 +242,11 @@ async def set_project_current_version(
     """设置项目当前激活的项目版本（pm_version.id）。
 
     校验：
-    - 项目存在且属于当前用户
+    - 项目存在且属于当前用户 (ACL #27，admin 旁路)
     - 指定的 version_id 属于该项目
     """
-    project = await PMProjects.get_project_by_id(project_id, db=db)
-    if not project or project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
+    # ACL (#27): 复用统一 access check (admin 旁路 + 404/403 语义)
+    await require_project_access(project_id, user.id, user.role, db)
 
     version = await PMVersions.get_version_by_id(form_data.version_id, db=db)
     if not version or version.project_id != project_id:
@@ -268,6 +274,8 @@ async def get_versions(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     return await PMVersions.get_versions_by_project_id(project_id, db=db)
 
 
@@ -278,6 +286,8 @@ async def create_version(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     form_data.project_id = project_id
     version = await PMVersions.insert_new_version(form_data, user.id, db=db)
     if not version:
@@ -300,6 +310,8 @@ async def get_entries(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28): 校验项目访问权
+    await require_project_access(project_id, user.id, user.role, db)
     # If no extra filters provided, use existing methods for backward compatibility
     if not any([module_type, status, priority, search]):
         entries = await PMEntries.get_entries_by_project_id(project_id, db=db)
@@ -467,6 +479,8 @@ async def export_module(
     注意：GET 受 URL 长度限制（8K-32K），条目 ID 列表过长时浏览器会抛
     "Failed to fetch"。请优先使用 POST 同路径端点。
     """
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     # 解析 columns_json
     columns: Optional[list] = None
     if columns_json:
@@ -523,6 +537,8 @@ async def export_module_post(
 
     优势：无 URL 长度限制，适合大量条目筛选场景。
     """
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     columns = body.columns if isinstance(body.columns, list) else None
     entry_ids_filter: Optional[set] = None
     if body.entry_ids and isinstance(body.entry_ids, list) and len(body.entry_ids) > 0:
@@ -545,6 +561,8 @@ async def search_entries(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Full-text search across entries (title + content)."""
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     query = select(PMEntry).where(
         PMEntry.project_id == project_id,
         (PMEntry.title.ilike(f'%{q}%') | PMEntry.content.ilike(f'%{q}%'))
@@ -577,12 +595,13 @@ async def create_entry(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27): 校验项目访问权后再创建条目
+    project = await require_project_access(project_id, user.id, user.role, db)
     form_data.project_id = project_id
 
     # 自动填充 project_version_id：若前端未显式传入，则取项目当前激活版本
     if not form_data.project_version_id:
-        project = await PMProjects.get_project_by_id(project_id, db=db)
-        if project and getattr(project, 'current_version_id', None):
+        if getattr(project, 'current_version_id', None):
             form_data.project_version_id = project.current_version_id
 
     # 若仍无 project_version_id，尝试从 data.versionId 回填
@@ -700,14 +719,8 @@ async def get_entry(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    entry = await PMEntries.get_entry_by_id(entry_id, db=db)
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Entry not found')
-    # Verify user has access to the project
-    project = await PMProjects.get_project_by_id(entry.project_id, db=db)
-    if not project or project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
-    return entry
+    # ACL (#28): 通过 entry→project 链校验，防 IDOR；admin 旁路
+    return await require_entry_access(entry_id, user.id, user.role, db)
 
 
 @router.post('/entries/{entry_id}', response_model=PMEntryModel)
@@ -717,13 +730,8 @@ async def update_entry(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    entry = await PMEntries.get_entry_by_id(entry_id, db=db)
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Entry not found')
-    # Verify user has access to the project
-    project = await PMProjects.get_project_by_id(entry.project_id, db=db)
-    if not project or project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#28): 校验后再更新
+    entry = await require_entry_access(entry_id, user.id, user.role, db)
 
     # 补绑 module_version_id：处理历史数据（在 create_entry 自动绑定修复前创建的
     # 功能/参数 entry 没有绑定 module_version_id），在用户修改时反查父模块当前版本回填。
@@ -760,13 +768,8 @@ async def delete_entry(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    entry = await PMEntries.get_entry_by_id(entry_id, db=db)
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Entry not found')
-    # Verify user has access to the project
-    project = await PMProjects.get_project_by_id(entry.project_id, db=db)
-    if not project or project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#28): 校验后再删除
+    await require_entry_access(entry_id, user.id, user.role, db)
     await PMEntries.delete_entry_by_id(entry_id, db=db)
     return True
 
@@ -782,6 +785,8 @@ async def get_entry_versions(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryVersions
     versions = await PMEntryVersions.get_versions_by_entry_id(entry_id, db=db)
     return versions
@@ -795,6 +800,8 @@ async def create_entry_version(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryVersions, PMEntryVersionForm
     import time  # D22: 需要 time.time_ns() 取纳秒时间戳
     # Get current entry to snapshot
@@ -887,6 +894,8 @@ async def get_entry_version(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryVersions
     version = await PMEntryVersions.get_version_by_id(version_id, db=db)
     if not version:
@@ -902,6 +911,8 @@ async def switch_entry_version(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryVersions
     version = await PMEntryVersions.get_version_by_id(version_id, db=db)
     if not version:
@@ -933,6 +944,8 @@ async def diff_entry_versions(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Compare two versions and return diff"""
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryVersions
     version_a = await PMEntryVersions.get_version_by_id(version_id_a, db=db)
     version_b = await PMEntryVersions.get_version_by_id(version_id_b, db=db)
@@ -979,6 +992,8 @@ async def compare_entry_versions(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Compare two entry versions and return structured diff."""
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryVersions
     v1 = await PMEntryVersions.get_version_by_id(version_a, db=db)
     v2 = await PMEntryVersions.get_version_by_id(version_b, db=db)
@@ -1035,6 +1050,8 @@ async def get_entry_branches(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryBranches
     return await PMEntryBranches.get_branches_by_entry_id(entry_id, db=db)
 
@@ -1047,6 +1064,8 @@ async def create_entry_branch(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryBranches, PMEntryBranchForm
     branch_form = PMEntryBranchForm(
         project_id=project_id,
@@ -1069,6 +1088,8 @@ async def get_entry_merges(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryMerges
     return await PMEntryMerges.get_merges_by_entry_id(entry_id, db=db)
 
@@ -1081,6 +1102,8 @@ async def create_entry_merge(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # ACL (#27/#28)
+    await require_project_access(project_id, user.id, user.role, db)
     from open_webui.models.pm import PMEntryMerges, PMEntryMergeForm
     merge_form = PMEntryMergeForm(
         entry_id=entry_id,
@@ -1218,12 +1241,8 @@ async def import_entries(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Import entries into a project from JSON or CSV."""
-    # Verify project exists and user owns it
-    project = await PMProjects.get_project_by_id(project_id, db=db)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
-    if project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#27): 复用统一 access check (admin 旁路)
+    await require_project_access(project_id, user.id, user.role, db)
 
     result = await _import_entries(
         project_id=project_id,
@@ -1251,13 +1270,8 @@ async def export_entry(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Export an entry in JSON, Markdown, or CSV format."""
-    entry = await PMEntries.get_entry_by_id(entry_id, db=db)
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Entry not found')
-    # Verify user has access to the project
-    project = await PMProjects.get_project_by_id(entry.project_id, db=db)
-    if not project or project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#28): 通过 entry→project 链校验，防 IDOR；admin 旁路
+    entry = await require_entry_access(entry_id, user.id, user.role, db)
 
     # Get latest version
     from open_webui.models.pm import PMEntryVersions
@@ -1994,6 +2008,8 @@ async def create_module_version(
     新建后自动切换为活动版本：把该模块下所有 entry 的 module_version_id
     更新为新版本 ID。满足用户需求"每次新建自动关联上对应版本"。
     """
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     if form.module_entry_id != module_entry_id:
         raise HTTPException(status_code=400, detail='module_entry_id mismatch')
     if not form.project_id:
@@ -2068,6 +2084,8 @@ async def list_module_versions(
     db: AsyncSession = Depends(get_async_session),
 ):
     """列出指定模块的所有版本，按 created_at 降序。"""
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     return await PMModuleVersions.get_versions_by_module_entry_id(module_entry_id, db)
 
 
@@ -2087,6 +2105,8 @@ async def switch_module_version(
     匹配范围：module/feature/parameter entry 中 data.moduleId 或 data.parentId
     等于 module_entry_id 的，全部更新 module_version_id。
     """
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     version = await PMModuleVersions.get_version_by_id(version_id, db)
     if not version or version.module_entry_id != module_entry_id:
         raise HTTPException(status_code=404, detail='Module version not found')
@@ -2115,6 +2135,8 @@ async def delete_module_version(
     db: AsyncSession = Depends(get_async_session),
 ):
     """删除模块版本。删除前应确认没有 entry 仍绑定到此版本。"""
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
     return await PMModuleVersions.delete_version_by_id(version_id, db)
 
 
@@ -2132,6 +2154,9 @@ async def get_module_version_span(
 
     用于 UI 展示"版本跨度：X 个版本"，帮助用户理解一个功能/参数跨了多少个模块版本。
     """
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
+
     stmt = select(PMEntry).where(
         PMEntry.project_id == project_id,
         (PMEntry.module_type == 'product-architecture') | (PMEntry.module_type == 'parameter'),
@@ -2179,6 +2204,8 @@ async def list_flow_templates(
 
     # DB-stored custom templates (entries with module_type="flow_template")
     if project_id:
+        # ACL (#27)
+        await require_project_access(project_id, user.id, user.role, db)
         from open_webui.models.pm import PMEntity
         query = select(PMEntry).where(
             PMEntry.project_id == project_id,
@@ -2214,8 +2241,9 @@ async def preview_flow(
         # Check custom templates
         if form_data.template_id.startswith('custom_'):
             entry_id = form_data.template_id[len('custom_'):]
-            entry = await PMEntries.get_entry_by_id(entry_id, db=db)
-            if entry and entry.module_type == 'flow_template':
+            # ACL (#28): 通过 entry→project 链校验，防 IDOR
+            entry = await require_entry_access(entry_id, user.id, user.role, db)
+            if entry.module_type == 'flow_template':
                 tpl_data = entry.data or {}
                 template = {
                     'id': form_data.template_id,
@@ -2232,9 +2260,9 @@ async def preview_flow(
     # Fetch source entries for context
     source_entries = []
     for eid in form_data.source_entry_ids:
-        entry = await PMEntries.get_entry_by_id(eid, db=db)
-        if entry:
-            source_entries.append({'id': entry.id, 'title': entry.title, 'module_type': entry.module_type})
+        # ACL (#28): 通过 entry→project 链校验，防 IDOR
+        entry = await require_entry_access(eid, user.id, user.role, db)
+        source_entries.append({'id': entry.id, 'title': entry.title, 'module_type': entry.module_type})
 
     # Build preview
     preview = {
@@ -2277,12 +2305,8 @@ async def execute_flow(
     if not form_data.confirmed:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Flow execution requires confirmation (confirmed=True)')
 
-    # Verify project access
-    project = await PMProjects.get_project_by_id(form_data.project_id, db=db)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
-    if project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#27): 复用统一 access check (admin 旁路 + 404/403 语义)
+    await require_project_access(form_data.project_id, user.id, user.role, db)
 
     # Find executor
     executor = FLOW_EXECUTORS.get(form_data.template_id)
@@ -2323,12 +2347,8 @@ async def create_flow_template(
     if not project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='project_id is required')
 
-    # Verify project access
-    project = await PMProjects.get_project_by_id(project_id, db=db)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
-    if project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
 
     # Store as entry with module_type="flow_template"
     template_data = {
@@ -2478,11 +2498,8 @@ async def auto_extract_architecture(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    project = await PMProjects.get_project_by_id(project_id, db=db)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
-    if project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
 
     query = select(PMEntry).where(
         PMEntry.project_id == project_id,
@@ -2531,11 +2548,8 @@ async def sync_architecture(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    project = await PMProjects.get_project_by_id(project_id, db=db)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Project not found')
-    if project.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    # ACL (#27)
+    await require_project_access(project_id, user.id, user.role, db)
 
     query = select(PMEntry).where(
         PMEntry.project_id == project_id,
@@ -2773,6 +2787,10 @@ async def agent_chat(
     uses the standard OpenWebUI chat loop (process_chat_payload +
     generate_chat_completion with stream=True).
     """
+    # ACL (#28): 若指定 project_id，校验访问权（防越权操作他人项目）
+    if form_data.project_id:
+        await require_project_access(form_data.project_id, user.id, user.role, db)
+
     skill_id, confidence = detect_intent(form_data.message)
     return await _agent_chat_native(request, form_data, user, skill_id, confidence)
 

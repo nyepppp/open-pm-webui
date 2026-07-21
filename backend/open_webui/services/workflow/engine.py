@@ -149,7 +149,8 @@ class WorkflowExecutionEngine:
         input_data: Dict[str, Any],
         execution_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        chat_model_id: Optional[str] = None
+        chat_model_id: Optional[str] = None,
+        project_id: Optional[str] = None
     ) -> str:
         """
         Execute a workflow and return execution ID.
@@ -158,8 +159,12 @@ class WorkflowExecutionEngine:
             workflow_id: The workflow ID to execute
             input_data: Input data for the workflow
             execution_id: Optional execution ID (generated if not provided)
-            user_id: Optional user ID for tracking
+            user_id: Optional user ID for tracking (Issue #29: written to
+                pm_workflow_executions.user_id for audit/ACL)
             chat_model_id: Optional chat model ID to inherit from chat UI
+            project_id: Optional project context (Issue #29: written to
+                pm_workflow_executions.project_id for audit/ACL). Router should
+                derive this from the loaded workflow's project_id.
 
         Returns:
             Execution ID
@@ -175,7 +180,9 @@ class WorkflowExecutionEngine:
             node_states="[]",
             logs="[]",
         )
-        execution = await WorkflowExecutions.insert_new_execution(form_data)
+        execution = await WorkflowExecutions.insert_new_execution(
+            form_data, user_id=user_id, project_id=project_id
+        )
         if execution is None or not hasattr(execution, 'id') or execution.id is None:
             raise WorkflowEngineError("Failed to create execution record")
         execution_id = execution.id
