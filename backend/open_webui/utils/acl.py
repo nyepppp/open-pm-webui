@@ -152,3 +152,54 @@ def require_workflow_owner(resource_owner_id: str, actor_user_id: str, actor_rol
     project/entry access without inspecting call sites.
     """
     require_owner(resource_owner_id, actor_user_id, actor_role)
+
+
+async def require_extension_access(
+    resource_type: str,
+    resource_id: str,
+    actor_user_id: str,
+    actor_role: str,
+    required_level: str = 'execute',
+) -> None:
+    """Verify the actor has `required_level` permission on an extension resource.
+
+    #33 Security governance: RBAC for skills/tools/functions.
+
+    - Admin role bypasses.
+    - Otherwise queries `pm_permission` table for user-level or role-level grants.
+    - Raises 403 if no matching grant.
+
+    Args:
+        resource_type: 'skill' | 'tool' | 'function' | 'workflow'.
+        resource_id: The resource's id.
+        actor_user_id: The authenticated user's id.
+        actor_role: The authenticated user's role.
+        required_level: 'read' | 'execute' | 'manage'. Default 'execute' since
+            most extension calls are invocations, not reads.
+
+    Raises:
+        HTTPException(403): If actor lacks required_level on the resource.
+    """
+    # Lazy import to avoid circular dependency (acl.py <-> permissions.py)
+    from open_webui.models.permissions import Permissions
+
+    ok = await Permissions.check(
+        resource_type=resource_type,
+        resource_id=resource_id,
+        user_id=actor_user_id,
+        user_role=actor_role,
+        required_level=required_level,
+    )
+    if not ok:
+        log.warning(
+            '[ACL] extension access denied: actor=%s role=%s resource=%s:%s required=%s',
+            actor_user_id,
+            actor_role,
+            resource_type,
+            resource_id,
+            required_level,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f'Access denied: no {required_level!r} permission on {resource_type}:{resource_id}.',
+        )

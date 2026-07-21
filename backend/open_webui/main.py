@@ -501,6 +501,7 @@ from open_webui.routers import (
     openai,
     pipelines,
     pm,
+    permissions,
     prompts,
     retrieval,
     scim,
@@ -1461,6 +1462,7 @@ app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledg
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
+app.include_router(permissions.router, prefix='/api/v1/permissions', tags=['permissions'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
